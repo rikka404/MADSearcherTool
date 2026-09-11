@@ -1,0 +1,42 @@
+# Local runtimes, downloaded models, generated media and releases
+/.venv/
+/venv/
+/models/
+/workspace/
+/artifacts/
+
+# .NET / Visual Studio build output and local state
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+
+# Python bytecode, package metadata and tooling caches
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local credentials and settings; keep sanitized templates trackable
+.env
+.env.*
+!.env.example
+!.env.template
+settings.local.json
+
+# Runtime databases, logs and operating-system metadata
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+Thumbs.db
+.DS_Store

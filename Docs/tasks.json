@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "rule": "Only start a node when every dependency is completed. Root updates this file after verification.",
+  "nodes": [
+    {
+      "id": "research",
+      "title": "MAD与模型技术调研及可行性",
+      "depends_on": [],
+      "status": "completed"
+    },
+    {
+      "id": "design",
+      "title": "技术架构、功能边界和进程合同",
+      "depends_on": [
+        "research"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "foundation",
+      "title": "项目结构、NDJSON协议、验证与FFmpeg核心",
+      "depends_on": [
+        "design"
+      ],
+      "status": "completed",
+      "evidence": "3 foundation tests passed, including real FFmpeg Unicode path / PNG / clip integration"
+    },
+    {
+      "id": "search",
+      "title": "分组、字幕、ASR、视觉索引与语义检索",
+      "depends_on": [
+        "foundation"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "library",
+            "title": "分组与素材持久化",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:01.841421+08:00",
+            "evidence": "19 module tests passed: subtitles 5, AI contracts 5, search/store 9"
+          },
+          {
+            "id": "subtitles",
+            "title": "多格式字幕解析与时间偏移",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:02.063489+08:00",
+            "evidence": "19 module tests passed: subtitles 5, AI contracts 5, search/store 9"
+          },
+          {
+            "id": "ai",
+            "title": "OpenAI视觉与向量接口",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:02.356311+08:00",
+            "evidence": "19 module tests passed: subtitles 5, AI contracts 5, search/store 9"
+          },
+          {
+            "id": "index_query",
+            "title": "索引与混合检索",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:02.612888+08:00",
+            "evidence": "19 module tests passed: subtitles 5, AI contracts 5, search/store 9"
+          },
+          {
+            "id": "verify",
+            "title": "已执行基础检查与结果记录",
+            "depends_on": [
+              "library",
+              "subtitles",
+              "ai",
+              "index_query"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:02.836347+08:00",
+            "evidence": "既有模块检查已完成；历史报告保留，后续新增及回归测试按用户要求移至延期 acceptance 节点。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cutout",
+      "title": "SAM2提示传播、透明输出及AE交接",
+      "depends_on": [
+        "foundation"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "prompt_tracking",
+            "title": "提示校验和分块目标传播",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:01:58.172752+08:00",
+            "evidence": "Implementation reviewed; 9 cutout tests passed including multi-block handoff"
+          },
+          {
+            "id": "exports",
+            "title": "透明输出和AE路径生成",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:01:58.365341+08:00",
+            "evidence": "Real FFmpeg alpha decode and AE contour topology tests passed"
+          },
+          {
+            "id": "verify",
+            "title": "已执行基础检查与结果记录",
+            "depends_on": [
+              "prompt_tracking",
+              "exports"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:01:58.539425+08:00",
+            "evidence": "既有模块检查已完成；历史报告保留，后续新增及回归测试按用户要求移至延期 acceptance 节点。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop",
+      "title": "WPF功能页、状态、配置与进程客户端",
+      "depends_on": [
+        "foundation"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "client_settings",
+            "title": "进程通信与会话配置",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:03.054951+08:00",
+            "evidence": "WPF Release build passed with 0 warnings and 0 errors"
+          },
+          {
+            "id": "views_handlers",
+            "title": "功能页面与操作处理",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:03.268534+08:00",
+            "evidence": "WPF Release build passed with 0 warnings and 0 errors"
+          },
+          {
+            "id": "verify",
+            "title": "已执行基础检查与结果记录",
+            "depends_on": [
+              "client_settings",
+              "views_handlers"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-09T10:04:03.480016+08:00",
+            "evidence": "历史18项smoke记录保留；partial整理和空结果修复后仅Release编译通过，0警告0错误，新回归按用户要求延期。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "integration",
+      "title": "代码收尾与模块接口核对（不运行测试）",
+      "depends_on": [
+        "search",
+        "cutout",
+        "desktop",
+        "cli"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-10T14:32:37.139114+00:00",
+      "evidence": "静态核对NDJSON命令与显式语义开关，修正启动exe名及蒙版选择过滤器；未运行测试。"
+    },
+    {
+      "id": "delivery",
+      "title": "发布、使用及扩展文档、复现问题skill和交付记录",
+      "depends_on": [
+        "integration"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-11T15:23:30.639855+00:00",
+      "evidence": "已发布 artifacts/app/MADSearcher.exe；使用说明、扩展开发说明、历史验收记录及复现问题skill齐全，文档本地链接无缺失。未运行新测试或回归，acceptance继续延期。"
+    },
+    {
+      "id": "acceptance",
+      "title": "等待用户补充测试文档后的完整验收",
+      "depends_on": [
+        "delivery"
+      ],
+      "status": "deferred",
+      "reason": "2026-09-10 用户明确要求暂时不测试；包含代码整理后的回归、真实动画抠像、AE联调及真实API/ASR验证。"
+    },
+    {
+      "id": "cli",
+      "title": "参数化命令行入口及AE派发适配",
+      "depends_on": [
+        "foundation",
+        "search",
+        "cutout"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-10T14:32:36.912959+00:00",
+      "evidence": "参数化CLI和原始request入口覆盖全部worker命令，增加ae.send；用户要求不测试，新入口待后续验收。"
+    }
+  ],
+  "scope_update": "2026-09-10：本次完成实现收尾与使用文档，测试验收延期，保留历史记录。"
+}

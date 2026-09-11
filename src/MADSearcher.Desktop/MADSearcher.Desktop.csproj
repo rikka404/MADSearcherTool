@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MADSearcher</AssemblyName>
+    <RootNamespace>MADSearcher.Desktop</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+</Project>
