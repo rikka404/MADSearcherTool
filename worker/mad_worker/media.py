@@ -52,16 +52,36 @@ class Media:
             fps_raw = video.get("avg_frame_rate") or video.get("r_frame_rate") or "0"
             try:
                 fps = float(Fraction(fps_raw))
+                if fps <= 0:
+                    raise ValueError()
             except (ValueError, ZeroDivisionError):
-                fps = float(Fraction(video.get("r_frame_rate", "0")))
+                fps_raw = video.get("r_frame_rate", "0")
+                fps = float(Fraction(fps_raw))
             width, height = int(video["width"]), int(video["height"])
             if not math.isfinite(duration) or duration <= 0 or not math.isfinite(fps) or fps <= 0 or width <= 0 or height <= 0:
                 raise ValueError()
         except (ValueError, KeyError, TypeError, ZeroDivisionError):
             raise UserError("无法读取有效的视频时长、尺寸或帧率，请先转码为标准 MP4。", "media")
+        count_raw = str(video.get("nb_frames") or "")
+        count = int(count_raw) if count_raw.isdigit() and int(count_raw) > 0 else None
         return {"path": str(path), "duration": duration, "width": width, "height": height,
                 "fps": fps, "has_audio": any(s.get("codec_type") == "audio" for s in streams),
-                "codec": video.get("codec_name", "unknown"), "fps_rational": fps_raw}
+                "codec": video.get("codec_name", "unknown"), "fps_rational": fps_raw, "frame_count": count}
+
+    def extract_frame_index(self, path, index, output):
+        from .timecode import frame_index
+        source = existing_file(path, "视频")
+        index = frame_index(index, "帧号")
+        output = Path(output).resolve()
+        if output == source:
+            raise UserError("输出不能覆盖原视频。")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        self.run(["-y", "-i", source, "-map", "0:v:0", "-an",
+                  "-vf", f"trim=start_frame={index}:end_frame={index + 1},setpts=PTS-STARTPTS",
+                  "-fps_mode", "passthrough", "-frames:v", "1", "-update", "1", output], timeout=1800)
+        if not output.is_file() or output.stat().st_size == 0:
+            raise UserError("没有解码到指定帧，请检查帧号是否超出实际视频范围。", "media")
+        return str(output)
 
     def extract_frame(self, path, seconds, output):
         source = existing_file(path, "视频")

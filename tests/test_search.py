@@ -68,6 +68,15 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(store.connection.execute("SELECT count(*) FROM segments").fetchone()[0], 0)
             self.assertEqual(store.connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
 
+    def test_zero_duration_subtitles_are_indexed_once_at_their_timestamp(self):
+        self.subtitle.write_text("1\n00:00:00,000 --> 00:00:00,000\n片头\n\n2\n00:00:02,000 --> 00:00:02,000\n边界人物\n\n3\n00:00:08,000 --> 00:00:08,000\n视频之外\n", encoding="utf-8")
+        self.assertEqual(self.index()["segment_count"], 2)
+        with Store(self.ctx.workspace) as store:
+            segments = store.segments(self.group["id"])
+        self.assertEqual([(s["start"], s["end"], s["subtitle"]) for s in segments], [(0, 2, "片头"), (2, 4, "边界人物")])
+        result = self.search("边界人物")["results"]
+        self.assertEqual([(r["start"], r["end"]) for r in result], [(2, 4)])
+
     def test_duplicate_import_and_invalid_batch_are_atomic(self):
         result = self.call("video.add", group_id=self.group["id"], paths=[str(self.source), str(self.source)])
         self.assertEqual(len(result["videos"]), 1)

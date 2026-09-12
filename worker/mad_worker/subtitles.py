@@ -15,6 +15,12 @@ class Cue:
     end: float
     text: str
 
+    def overlaps(self, start, end):
+        """Use half-open windows; a zero-duration cue belongs to its timestamp."""
+        if self.start == self.end:
+            return start <= self.start < end
+        return self.start < end and self.end > start
+
 
 def _clock(value):
     value = value.strip().replace(",", ".")
@@ -100,12 +106,12 @@ def parse_subtitles(path, offset=0, duration=None):
     for start, end, words, position in raw_cues:
         try:
             start, end = _clock(start), _clock(end)
-            if end <= start or not math.isfinite(end):
-                raise ValueError("结束时间必须大于开始时间")
+            if not math.isfinite(start) or not math.isfinite(end) or end < start:
+                raise ValueError("起止时间必须为有限值，结束时间不能早于开始时间")
         except (ValueError, OverflowError) as exc:
             raise UserError(f"字幕第{position}项时间轴无效：{exc}。")
         start, end = start + offset, end + offset
-        if end <= 0 or duration is not None and start >= duration:
+        if end < 0 or end == 0 and start < 0 or duration is not None and start >= duration:
             clipped += 1
             continue
         if words:

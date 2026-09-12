@@ -34,7 +34,10 @@ public sealed class AppSettings
     public string WhisperModel { get; set; } = "small";
     public string WhisperDevice { get; set; } = "cpu";
     public string AfterFxPath { get; set; } = "";
-    [JsonIgnore] public string ApiKey { get; set; } = "";
+    public string ApiKey { get; set; } = "";
+
+    // Settings contain only value/string properties. Each task keeps its own copy.
+    public AppSettings Snapshot() => (AppSettings)MemberwiseClone();
 
     public Dictionary<string, object> WorkerValues() => new()
     {
@@ -98,6 +101,20 @@ public sealed class VideoInfo
     public static string FormatTime(double seconds) => TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(seconds >= 3600 ? @"hh\:mm\:ss" : @"mm\:ss", CultureInfo.InvariantCulture);
 }
 
+/// <summary>Worker-normalized source frame range; timecode arithmetic belongs to the worker.</summary>
+public sealed class CutRangeInfo
+{
+    [JsonPropertyName("video")] public VideoInfo Video { get; set; } = new();
+    [JsonPropertyName("start_frame")] public long StartFrame { get; set; }
+    [JsonPropertyName("end_frame")] public long EndFrame { get; set; }
+    [JsonPropertyName("start_timecode")] public string StartTimecode { get; set; } = "";
+    [JsonPropertyName("end_timecode")] public string EndTimecode { get; set; } = "";
+    [JsonPropertyName("frame_count")] public int FrameCount { get; set; }
+    [JsonPropertyName("nominal_fps")] public int NominalFps { get; set; }
+    [JsonPropertyName("total_frames")] public long TotalFrames { get; set; }
+    [JsonPropertyName("total_frames_estimated")] public bool TotalFramesEstimated { get; set; }
+}
+
 public sealed class SearchHit
 {
     [JsonPropertyName("video_id")] public string VideoId { get; set; } = "";
@@ -149,4 +166,6 @@ public sealed class ViewState : Observable
     public string CutInfo { get => _cutInfo; set => Set(ref _cutInfo, value); }
     private string _diagnostics = "检查 FFmpeg、Python、分割模型和语音识别环境。";
     public string Diagnostics { get => _diagnostics; set => Set(ref _diagnostics, value); }
+    private string _settingsHint = "设置和 API Key 可保存到本地；修改将在下次任务使用。";
+    public string SettingsHint { get => _settingsHint; set => Set(ref _settingsHint, value); }
 }

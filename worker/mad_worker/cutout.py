@@ -2,7 +2,6 @@
 import contextlib
 import gc
 import json
-import math
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -12,7 +11,8 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from .errors import UserError
-from .validation import existing_file, finite_number, time_range
+from .validation import existing_file, finite_number
+from .timecode import resolve_range
 from . import exporters
 
 
@@ -137,16 +137,19 @@ def load_predictor(settings):
     return predictor, torch, device, checkpoint, config
 
 
-def _decode_frames(ctx, info, start, end, fps, directory):
+def _decode_frames(ctx, info, selection, directory):
     directory.mkdir()
-    ctx.media.run(["-n", "-ss", f"{start:.6f}", "-i", info["path"], "-t", f"{end-start:.6f}",
-                   "-map", "0:v:0", "-an", "-vf", f"fps={fps:.10g}", "-start_number", "0",
+    # Decode source ordinals, then retime without duplicating or dropping frames.
+    rate = selection.rate
+    filters = (f"trim=start_frame={selection.start_frame}:end_frame={selection.end_frame},"
+               f"setpts=N*{rate.denominator}/({rate.numerator}*TB)")
+    ctx.media.run(["-n", "-i", info["path"], "-map", "0:v:0", "-an", "-vf", filters,
+                   "-fps_mode", "passthrough", "-frames:v", str(selection.frame_count), "-start_number", "0",
                    "-threads", "2", directory / "%06d.png"], timeout=1800)
     frames = sorted(directory.glob("*.png"))
-    if not frames:
-        raise UserError("选定片段没有可解码画面，请延长至少一帧。", "media")
-    if len(frames) > MAX_FRAMES:
-        raise UserError(f"解码后超过 {MAX_FRAMES} 帧，请缩短片段。")
+    if len(frames) != selection.frame_count:
+        raise UserError(f"选定范围应有 {selection.frame_count} 帧，实际仅解码 {len(frames)} 帧。"
+                        "视频总帧数可能不准确或存在损坏，请缩短终点或先转码。", "media")
     with Image.open(frames[0]) as image:
         if image.size != (info["width"], info["height"]):
             raise UserError("视频包含旋转信息或实际尺寸与元数据不符；请先转码到正确方向的标准 MP4。", "media")
@@ -224,10 +227,8 @@ def _propagate(predictor, torch, device, frames, initial_alpha, box, work_dir, r
 
 def run(params, ctx):
     info = ctx.media.probe(params.get("path"))
-    start, end = time_range(params.get("start"), params.get("end"), info["duration"])
-    fps = finite_number(info["fps"], "视频帧率", 1, 120)
-    if end - start > MAX_SECONDS or math.ceil((end - start) * fps - 1e-7) > MAX_FRAMES:
-        raise UserError(f"单次抠像最多 {MAX_SECONDS} 秒 / {MAX_FRAMES} 帧，请先裁短片段。")
+    selection = resolve_range(params, info, MAX_SECONDS, MAX_FRAMES)
+    fps = float(selection.rate)
     if info["width"] * info["height"] > MAX_PIXELS or max(info["width"], info["height"]) > 4096:
         raise UserError("抠像画面最多约 4K（884 万像素、任一边不超过 4096），请先降低视频分辨率。")
     if min(info["width"], info["height"]) < 16:
@@ -256,7 +257,7 @@ def run(params, ctx):
         raise UserError("输出位置是文件，请选择文件夹。")
     try:
         output_parent.mkdir(parents=True, exist_ok=True)
-        expected_frames = max(1, math.ceil((end - start) * fps))
+        expected_frames = selection.frame_count
         bytes_per_pixel = 16 if params.get("export_video", True) else 10
         needed = info["width"] * info["height"] * expected_frames * bytes_per_pixel + 256 * 1024 * 1024
         free = shutil.disk_usage(output_parent).free
@@ -264,8 +265,7 @@ def run(params, ctx):
             raise UserError(f"磁盘剩余空间不足，保守估计需 {needed / 1024**3:.1f} GB，当前剩余 {free / 1024**3:.1f} GB。请缩短片段或更换输出磁盘。")
     except OSError as exc:
         raise UserError(f"输出目录无法写入：{exc}", "permission")
-    ctx.progress(0.02, "正在加载 SAM 2 模型…")
-    predictor, torch, device, checkpoint, config = load_predictor(ctx.settings)
+    ctx.progress(0.02, "正在准备抠像输出…")
     task_dir = output_parent / ("cutout_" + datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8])
     task_dir.mkdir()
     incomplete = task_dir / "INCOMPLETE.txt"
@@ -274,12 +274,14 @@ def run(params, ctx):
     rgba_dir, mask_dir = task_dir / "rgba", task_dir / "masks"
     for directory in (work_dir, rgba_dir, mask_dir):
         directory.mkdir()
-    warnings = ["输出按源平均帧率采样为固定帧率（CFR）；可变帧率源不保留原生时间戳。",
+    warnings = ["按源解码帧号保留选中范围的每一帧，输出按平均帧率播放（CFR）；可变帧率源不保留原生时间戳。",
                 "SAM 分割是可修补的初稿；运动模糊、半透明特效、遮挡及切镜需逐帧检查。"]
     ctx.progress(0.06, "正在解码无损源画面…")
-    frames = _decode_frames(ctx, info, start, end, fps, source_dir)
+    frames = _decode_frames(ctx, info, selection, source_dir)
     if len(frames) > BLOCK_FRAMES:
         warnings.append(f"为限制内存每 {BLOCK_FRAMES} 帧分块，以重叠首帧蒙版衔接；分块边界可能出现跟踪误差。")
+    ctx.progress(0.10, "正在加载 SAM 2 模型…")
+    predictor, torch, device, checkpoint, config = load_predictor(ctx.settings)
     if mode in ("text", "reference"):
         ctx.progress(0.12, "正在根据描述/参考图定位首帧人物…")
         box = locate_target(frames[0], prompt, reference, info["width"], info["height"], ctx.settings)
@@ -311,12 +313,13 @@ def run(params, ctx):
                 raise
             warnings.append("AE 路径未导出：" + str(exc))
     manifest_path = task_dir / "manifest.json"
-    result = {"output_dir": str(task_dir), "frame_count": len(frames), "fps": fps,
+    result = {"output_dir": str(task_dir), **selection.as_dict(),
               "preview_path": preview_path, "rgba_dir": str(rgba_dir), "mask_dir": str(mask_dir),
               "video_path": video_path, "ae_script": ae_script, "manifest_path": str(manifest_path),
               "warnings": warnings}
-    manifest = {"schema_version": 1, "status": "complete", "created_utc": datetime.now(timezone.utc).isoformat(),
-                "source": info["path"], "source_start": start, "source_end": end,
+    manifest = {"schema_version": 2, "status": "complete", "created_utc": datetime.now(timezone.utc).isoformat(),
+                "source": info["path"], "source_start": selection.start, "source_end": selection.end,
+                "range_mapping": "decoded source frame ordinals, end exclusive; seconds = frame / average fps",
                 "width": info["width"], "height": info["height"], "prompt_mode": mode,
                 "target_box": box, "model": {"checkpoint": str(checkpoint), "config": config, "device": device},
                 "block_frames": BLOCK_FRAMES, "empty_frame_indices": missing,

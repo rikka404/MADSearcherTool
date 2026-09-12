@@ -46,6 +46,24 @@ class SubtitleTests(unittest.TestCase):
         cues, _ = parse_subtitles(self.write("1\n00:00:01,000 --> 00:00:02,000\n中文电车\n", encoding="gb18030"))
         self.assertEqual(cues[0].text, "中文电车")
 
+    def test_zero_duration_cues_keep_timestamp_and_use_half_open_windows(self):
+        for suffix, content in (
+            (".srt", "1\n00:00:00,000 --> 00:00:00,000\n开头\n\n2\n00:00:02,000 --> 00:00:02,000\n边界"),
+            (".vtt", "WEBVTT\n\n00:00.000 --> 00:00.000\n开头\n\n00:02.000 --> 00:02.000\n边界"),
+            (".ass", "[Events]\nDialogue: 0,0:00:00.00,0:00:00.00,Default,,0,0,0,,开头\nDialogue: 0,0:00:02.00,0:00:02.00,Default,,0,0,0,,边界"),
+        ):
+            with self.subTest(suffix=suffix):
+                path = self.write(content, suffix)
+                cues, warnings = parse_subtitles(path, duration=4)
+                self.assertEqual([(c.start, c.end) for c in cues], [(0, 0), (2, 2)])
+                self.assertFalse(warnings)
+                self.assertTrue(cues[0].overlaps(0, 2))
+                self.assertFalse(cues[1].overlaps(0, 2))
+                self.assertTrue(cues[1].overlaps(2, 4))
+                shifted, warnings = parse_subtitles(path, offset=-2, duration=4)
+                self.assertEqual([(c.start, c.end) for c in shifted], [(0, 0)])
+                self.assertTrue(warnings)
+
     def test_invalid_inputs_have_actionable_errors(self):
         for content in ("broken file", "1\n00:00:03,000 --> 00:00:02,000\n文本", "1\n00:60:00,000 --> 01:01:00,000\n文本", "1\n00:00:NaN --> 00:00:02,000\n文本"):
             with self.subTest(content=content), self.assertRaises(UserError):

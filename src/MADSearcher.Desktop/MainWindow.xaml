@@ -8,15 +8,15 @@
     <Border Background="#0C121A" BorderBrush="#263541" BorderThickness="0,0,0,1">
       <DockPanel>
         <TextBlock DockPanel.Dock="Right" Text="LOCAL WORKSPACE  /  1.0" Foreground="#78919F" FontSize="10" VerticalAlignment="Center" Margin="20,0" />
-        <Menu IsEnabled="{Binding IsIdle}">
+        <Menu>
           <MenuItem Header="文件">
             <MenuItem Header="打开工作区" Click="OpenWorkspace" />
-            <MenuItem Header="导入 MP4 素材…" Click="ImportVideos" />
+            <MenuItem Header="导入 MP4 素材…" Click="ImportVideos" IsEnabled="{Binding IsIdle}" />
             <Separator />
             <MenuItem Header="退出" Click="ExitApp" />
           </MenuItem>
           <MenuItem Header="工具">
-            <MenuItem Header="环境诊断" Click="CheckEnvironment" />
+            <MenuItem Header="环境诊断" Click="CheckEnvironment" IsEnabled="{Binding IsIdle}" />
             <MenuItem Header="设置" Click="ShowSettings" />
           </MenuItem>
           <MenuItem Header="帮助">
@@ -49,7 +49,7 @@
           </StackPanel>
         </DockPanel>
       </Border>
-      <Grid Grid.Column="1" Margin="24,23,24,18" x:Name="ToolPages" IsEnabled="{Binding IsIdle}">
+      <Grid Grid.Column="1" Margin="24,23,24,18" x:Name="ToolPages">
         <Grid x:Name="SearchPage">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -72,7 +72,7 @@
               </Grid.ColumnDefinitions>
               <TextBox x:Name="QueryBox" ToolTip="输入人物、场景、动作、情节或台词" KeyDown="QueryKeyDown" FontSize="15" MinHeight="42" />
               <CheckBox Grid.Column="1" x:Name="SemanticCheck" Content="语义检索" VerticalAlignment="Center" Margin="18,0,15,0" ToolTip="需要 OpenAI 密钥和已建立的视觉/语义索引" />
-              <Button Grid.Column="2" Content="查找片段 →" Style="{StaticResource Primary}" Click="SearchClicked" Margin="0" />
+              <Button Grid.Column="2" x:Name="SearchButton" Content="查找片段 →" Style="{StaticResource Primary}" Click="SearchClicked" IsEnabled="{Binding IsIdle}" Margin="0" />
             </Grid>
           </Border>
           <Grid Grid.Row="2">
@@ -88,16 +88,16 @@
                 <StackPanel>
                   <TextBlock Text="素材库" FontSize="17" FontWeight="SemiBold" />
                   <TextBlock Text="按动画分组 · 只在当前组检索" Style="{StaticResource Muted}" FontSize="11" Margin="0,3,0,12" />
-                  <ComboBox x:Name="GroupBox" ItemsSource="{Binding Groups}" SelectionChanged="GroupChanged" />
+                  <ComboBox x:Name="GroupBox" IsEnabled="{Binding IsIdle}" ToolTip="切换分组需要读取素材库；当前任务完成后可切换。" ItemsSource="{Binding Groups}" SelectionChanged="GroupChanged" />
                   <WrapPanel Margin="0,10,0,0">
-                    <Button Content="新建" Click="CreateGroup" />
-                    <Button Content="编辑" Click="EditGroup" />
-                    <Button Content="删除" Click="DeleteGroup" />
+                    <Button Content="新建" Click="CreateGroup" IsEnabled="{Binding IsIdle}" />
+                    <Button Content="编辑" Click="EditGroup" IsEnabled="{Binding IsIdle}" />
+                    <Button Content="删除" Click="DeleteGroup" IsEnabled="{Binding IsIdle}" />
                   </WrapPanel>
                   <TextBlock Text="{Binding LibraryHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,11,0,10" />
                   <WrapPanel>
-                    <Button Content="＋ 导入 MP4" Click="ImportVideos" />
-                    <Button Content="移除" Click="RemoveVideo" />
+                    <Button Content="＋ 导入 MP4" Click="ImportVideos" IsEnabled="{Binding IsIdle}" />
+                    <Button Content="移除" Click="RemoveVideo" IsEnabled="{Binding IsIdle}" />
                   </WrapPanel>
                   <ListBox x:Name="VideoList" ItemsSource="{Binding Videos}" SelectionChanged="VideoChanged" Height="155" Margin="0,10,0,0">
                     <ListBox.ItemTemplate>
@@ -139,8 +139,8 @@
                   <CheckBox x:Name="VisualCheck" Content="AI 分析画面与情节" FontSize="11" Margin="0,2,0,8" />
                   <CheckBox x:Name="SemanticIndexCheck" Content="建立字幕语义索引（OpenAI）" FontSize="11" Margin="0,2,0,8" />
                   <TextBlock Text="视觉索引发送采样画面和字幕，并自动建立语义索引。单独建立语义索引只发送字幕；语义查询发送查询文字。" Style="{StaticResource Muted}" FontSize="10" />
-                  <Button Content="建立 / 更新选中素材索引" Style="{StaticResource Primary}" Click="IndexSelected" Margin="0,12,0,0" />
-                  <Button Content="索引组内全部素材" Click="IndexAll" Margin="0,8,0,0" ToolTip="逐个处理每集素材；使用各自已有外挂字幕" />
+                  <Button x:Name="IndexButton" Content="建立 / 更新选中素材索引" Style="{StaticResource Primary}" Click="IndexSelected" IsEnabled="{Binding IsIdle}" Margin="0,12,0,0" />
+                  <Button Content="索引组内全部素材" Click="IndexAll" IsEnabled="{Binding IsIdle}" Margin="0,8,0,0" ToolTip="逐个处理每集素材；使用各自已有外挂字幕" />
                 </StackPanel>
               </ScrollViewer>
             </Border>
@@ -153,7 +153,10 @@
                 </Grid.RowDefinitions>
                 <TextBlock Text="匹配镜头" FontSize="17" FontWeight="SemiBold" />
                 <TextBlock Grid.Row="1" Text="{Binding ResultHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,5,0,14" />
-                <ListBox Grid.Row="2" x:Name="ResultsList" ItemsSource="{Binding Results}" SelectionChanged="ResultChanged">
+                <ListBox Grid.Row="2" x:Name="ResultsList" ItemsSource="{Binding Results}" SelectionChanged="ResultChanged"
+                         ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
                       <StackPanel>
@@ -197,17 +200,17 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                       <TextBlock Text="起点（秒）" Style="{StaticResource Label}" />
-                      <TextBox x:Name="PreviewStart" Text="0" />
+                      <TextBox x:Name="PreviewStart" TextChanged="PreviewInputsChanged" Text="0" />
                     </StackPanel>
                     <StackPanel Grid.Column="2">
                       <TextBlock Text="终点（秒）" Style="{StaticResource Label}" />
-                      <TextBox x:Name="PreviewEnd" Text="8" />
+                      <TextBox x:Name="PreviewEnd" TextChanged="PreviewInputsChanged" Text="8" />
                     </StackPanel>
                   </Grid>
                   <TextBlock Text="结果用于定位；调整起止后重新生成预览。" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,11" />
-                  <Button Content="生成 / 更新预览" Click="MakePreview" Margin="0,0,0,9" />
-                  <Button Content="导出 MP4 片段" Click="ExportClip" Margin="0,0,0,9" />
-                  <Button Content="送到自动抠像 →" Style="{StaticResource Primary}" Click="SendToCutout" Margin="0,0,0,14" />
+                  <Button Content="生成 / 更新预览" Click="MakePreview" IsEnabled="{Binding IsIdle}" Margin="0,0,0,9" />
+                  <Button Content="导出 MP4 片段" Click="ExportClip" IsEnabled="{Binding IsIdle}" Margin="0,0,0,9" />
+                  <Button Content="送到自动抠像 →" Style="{StaticResource Primary}" Click="SendToCutout" IsEnabled="{Binding IsIdle}" Margin="0,0,0,14" />
                   <TextBlock x:Name="PreviewPathLabel" Text="预览与导出不会修改原视频。" Style="{StaticResource Muted}" FontSize="10" />
                 </StackPanel>
               </ScrollViewer>
@@ -237,8 +240,8 @@
                 <StackPanel>
                   <TextBlock Text="01  选择视频片段" FontSize="16" FontWeight="SemiBold" />
                   <DockPanel Margin="0,12,0,0">
-                    <Button Content="浏览…" Click="ChooseCutVideo" DockPanel.Dock="Right" Margin="7,0,0,0" />
-                    <TextBox x:Name="CutPathBox" ToolTip="原始视频或已导出的片段路径" />
+                    <Button Content="浏览…" Click="ChooseCutVideo" IsEnabled="{Binding IsIdle}" DockPanel.Dock="Right" Margin="7,0,0,0" />
+                    <TextBox x:Name="CutPathBox" TextChanged="CutSelectionChanged" ToolTip="原始视频或已导出的片段路径" />
                   </DockPanel>
                   <Grid>
                     <Grid.ColumnDefinitions>
@@ -247,15 +250,16 @@
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <StackPanel>
-                      <TextBlock Text="起点（秒）" Style="{StaticResource Label}" />
-                      <TextBox x:Name="CutStartBox" Text="0" />
+                      <TextBlock Text="起点（分:秒:帧）" Style="{StaticResource Label}" />
+                      <TextBox x:Name="CutStartBox" TextChanged="CutSelectionChanged" Text="00:00:00" />
                     </StackPanel>
                     <StackPanel Grid.Column="2">
-                      <TextBlock Text="终点（秒）" Style="{StaticResource Label}" />
-                      <TextBox x:Name="CutEndBox" Text="5" />
+                      <TextBlock Text="终点（不含该帧）" Style="{StaticResource Label}" />
+                      <TextBox x:Name="CutEndBox" TextChanged="CutSelectionChanged" Text="00:05:00" />
                     </StackPanel>
                   </Grid>
-                  <Button Content="读取片段首帧" Click="ReadCutFrame" Margin="0,12,0,0" />
+                  <TextBlock Text="格式 01:23:05 = 1分23秒第5帧。帧从0起，也可输入小数秒，读取首帧时自动换算。非整数帧率按非丢帧时间码编号。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
+                  <Button Content="读取片段首帧" Click="ReadCutFrame" IsEnabled="{Binding IsIdle}" Margin="0,12,0,0" />
                   <TextBlock Text="{Binding CutInfo}" Style="{StaticResource Muted}" Margin="0,9,0,0" FontSize="11" />
                   <TextBlock Text="02  指定要保留的主体" FontSize="16" FontWeight="SemiBold" Margin="0,25,0,12" />
                   <ComboBox x:Name="PromptModeBox" SelectedIndex="0" SelectionChanged="PromptModeChanged">
@@ -299,7 +303,7 @@
                   <CheckBox x:Name="ExportMovCheck" Content="透明视频 · ProRes 4444 MOV" IsChecked="True" />
                   <CheckBox x:Name="ExportAeCheck" Content="AE 逐帧路径蒙版脚本 · JSX" IsChecked="True" Margin="0,2,0,6" />
                   <TextBlock Text="PSD 序列暂不支持。复杂发丝、特效和遮挡需人工检查。" Style="{StaticResource Muted}" FontSize="10" />
-                  <Button Content="开始抠像 →" Style="{StaticResource Primary}" Click="RunCutout" Margin="0,18,0,3" />
+                  <Button Content="开始抠像 →" Style="{StaticResource Primary}" Click="RunCutout" IsEnabled="{Binding IsIdle}" Margin="0,18,0,3" />
                   <TextBlock Text="建议先测试 2–10 秒；单次最多 120 秒 / 3600 帧。" Style="{StaticResource Muted}" FontSize="10" Margin="0,7,0,0" />
                 </StackPanel>
               </ScrollViewer>
@@ -339,7 +343,7 @@
                     <Button Content="▶ 预览结果" Click="PlayCutResult" />
                     <Button Content="Ⅱ 暂停" Click="PauseCutResult" />
                     <Button Content="打开输出" Click="OpenCutResult" />
-                    <Button Content="发送到 AE" Style="{StaticResource Primary}" Click="SendToAe" />
+                    <Button Content="发送到 AE" Style="{StaticResource Primary}" Click="SendToAe" IsEnabled="{Binding IsIdle}" />
                   </WrapPanel>
                 </StackPanel>
               </Border>
@@ -354,7 +358,7 @@
           <DockPanel Margin="0,0,0,20">
             <StackPanel>
               <TextBlock Text="设置与环境" FontSize="25" FontWeight="SemiBold" />
-              <TextBlock Text="一次配置，把本地工具和创作流程连接起来。" Style="{StaticResource Muted}" Margin="0,6,0,0" />
+              <TextBlock Text="{Binding SettingsHint}" Style="{StaticResource Muted}" Margin="0,6,0,0" />
             </StackPanel>
             <Button Content="保存设置" Style="{StaticResource Primary}" Click="SaveSettings" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" />
           </DockPanel>
@@ -375,7 +379,7 @@
                     <TextBox Text="{Binding Settings.FfmpegPath, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBox Text="{Binding Settings.FfprobePath, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" />
                     <TextBlock Text="工作区（必须位于当前项目目录内）" Style="{StaticResource Label}" />
-                    <TextBox Text="{Binding Settings.Workspace, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBox IsEnabled="{Binding IsIdle}" Text="{Binding Settings.Workspace, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock Text="数据库、缓存和任务输出保存在工作区。原始素材使用路径引用。" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,0" />
                     <TextBlock Text="After Effects / AfterFX.exe（可选）" Style="{StaticResource Label}" />
                     <TextBox Text="{Binding Settings.AfterFxPath, UpdateSourceTrigger=PropertyChanged}" />
@@ -385,7 +389,7 @@
                   <StackPanel>
                     <DockPanel>
                       <TextBlock Text="环境诊断" FontSize="17" FontWeight="SemiBold" />
-                      <Button Content="立即检查" Click="CheckEnvironment" HorizontalAlignment="Right" Margin="0" />
+                      <Button Content="立即检查" Click="CheckEnvironment" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Right" Margin="0" />
                     </DockPanel>
                     <TextBlock Text="{Binding Diagnostics}" Style="{StaticResource Muted}" Margin="0,13,0,0" />
                   </StackPanel>
@@ -395,9 +399,9 @@
                 <Border Style="{StaticResource Card}">
                   <StackPanel>
                     <TextBlock Text="OpenAI · 画面理解与语义检索" FontSize="17" FontWeight="SemiBold" />
-                    <TextBlock Text="API Key（仅保留在本次会话）" Style="{StaticResource Label}" />
+                    <TextBlock Text="API Key（随设置保存到本地）" Style="{StaticResource Label}" />
                     <PasswordBox x:Name="ApiKeyBox" PasswordChanged="ApiKeyChanged" />
-                    <TextBlock Text="默认留空。仅在你启用 AI 操作时发送采样画面、字幕、描述或查询，费用由 API 账户承担。" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,0" />
+                    <TextBlock Text="默认留空，保存时以明文存储在本地设置中。仅在你启用 AI 操作时发送采样画面、字幕、描述或查询，费用由 API 账户承担。" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,0" />
                     <TextBlock Text="视觉模型" Style="{StaticResource Label}" />
                     <TextBox Text="{Binding Settings.VisionModel, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock Text="Embedding 模型" Style="{StaticResource Label}" />

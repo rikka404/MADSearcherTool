@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private readonly ViewState _state;
     private readonly bool _smoke;
     private CancellationTokenSource? _cancellation;
+    private AppSettings? _taskSettings;
+    private AppSettings OperationSettings => _taskSettings ?? _state.Settings;
     private readonly DispatcherTimer _playbackTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private Task _lastOperation = Task.CompletedTask;
 
@@ -30,8 +32,10 @@ public partial class MainWindow : Window
         if (_smoke)
             _state.Settings.Workspace = Path.Combine(_root, "artifacts", "desktop-smoke", "workspace-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
         _worker = new WorkerClient(_root);
+        var savedKey = _state.Settings.ApiKey;
         InitializeComponent();
         DataContext = _state;
+        ApiKeyBox.Password = savedKey ?? "";
         CutOutputBox.Text = Path.Combine(_state.Settings.Workspace, "exports", "cutout");
         Navigate("search");
         _playbackTimer.Tick += (_, _) =>
@@ -88,9 +92,10 @@ public partial class MainWindow : Window
         _state.Progress = 0;
         _state.Status = message;
         _cancellation = new CancellationTokenSource();
+        _taskSettings = _state.Settings.Snapshot();
         try
         {
-            ValidateSettings();
+            ValidateSettings(_taskSettings);
             await action(_cancellation.Token);
             _state.Progress = 1;
             if (_state.Status == message)
@@ -108,20 +113,32 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _taskSettings = null;
             _state.Busy = false;
             _cancellation.Dispose();
             _cancellation = null;
         }
     }
 
-    private string SafeError(string message) => string.IsNullOrEmpty(_state.Settings.ApiKey) ? message : message.Replace(_state.Settings.ApiKey, "[已隐藏密钥]", StringComparison.Ordinal);
+    private string SafeError(string message)
+    {
+        foreach (var key in new[] { _state.Settings.ApiKey, _taskSettings?.ApiKey })
+            if (!string.IsNullOrEmpty(key))
+                message = message.Replace(key, "[已隐藏密钥]", StringComparison.Ordinal);
+        return message;
+    }
 
-    private Task<JsonElement> Call(string command, object parameters, CancellationToken token) =>
-        _worker.RunAsync(command, parameters, _state.Settings, new Progress<(double Value, string Message)>(p =>
+    private Task<JsonElement> Call(string command, object parameters, CancellationToken token)
+    {
+        var settings = OperationSettings;
+        return _worker.RunAsync(command, parameters, settings, new Progress<(double Value, string Message)>(p =>
         {
+            if (!ReferenceEquals(_taskSettings, settings) || token.IsCancellationRequested)
+                return;
             _state.Progress = Math.Clamp(p.Value, 0, 1);
-            _state.Status = p.Message;
+            _state.Status = SafeError(p.Message);
         }), token);
+    }
 
     private static T[] Items<T>(JsonElement data, string property) => data.TryGetProperty(property, out var array) ? JsonSerializer.Deserialize<T[]>(array.GetRawText()) ?? [] : [];
     private static string Text(JsonElement data, string property) => data.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
@@ -137,6 +154,10 @@ public partial class MainWindow : Window
     {
         var start = Parse(startBox.Text, "起点");
         var end = Parse(endBox.Text, "终点");
+        return Range(start, end, duration, maxLength);
+    }
+    private static (double Start, double End) Range(double start, double end, double? duration = null, double? maxLength = null)
+    {
         if (start < 0 || end <= start)
             throw new InvalidOperationException("起点必须大于等于 0，终点必须晚于起点。");
         if (duration.HasValue && end > duration.Value + 0.001)
@@ -203,8 +224,16 @@ public partial class MainWindow : Window
     }
     private void OpenWorkspace(object sender, RoutedEventArgs e)
     {
-        Directory.CreateDirectory(_state.Settings.Workspace);
-        OpenPath(_state.Settings.Workspace);
+        try
+        {
+            var workspace = Path.GetFullPath(OperationSettings.Workspace, _root);
+            Directory.CreateDirectory(workspace);
+            OpenPath(workspace);
+        }
+        catch (Exception ex)
+        {
+            _state.Status = "无法打开工作区：" + SafeError(ex.Message);
+        }
     }
     private void OpenGuide(object sender, RoutedEventArgs e)
     {

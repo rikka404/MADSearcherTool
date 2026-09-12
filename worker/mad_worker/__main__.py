@@ -29,17 +29,31 @@ def handle(command, params, ctx):
         checks.append({"name": "SAM 权重", "ok": bool(checkpoint) and Path(checkpoint).is_file(),
                        "message": checkpoint or "未选择，请运行 scripts/setup.ps1 -WithSam 后在设置中选择权重"})
         checks.append({"name": "OpenAI", "ok": bool(str(ctx.settings.get("api_key") or "").strip()),
-                       "message": "本次会话已填写密钥（尚未验证权限）" if ctx.settings.get("api_key") else "未填写，字幕检索和本地蒙版抠像仍可用"})
+                       "message": "已配置密钥（尚未验证权限）" if ctx.settings.get("api_key") else "未填写，字幕检索和本地蒙版抠像仍可用"})
         return {"checks": checks, "python": platform.python_version(), "workspace": str(ctx.workspace)}
     if command == "video.probe":
         return ctx.media.probe(params.get("path"))
+    if command == "cutout.range":
+        from .timecode import resolve_range
+        info = ctx.media.probe(params.get("path"))
+        return {"video": info, **resolve_range(params, info).as_dict()}
     if command in ("video.frame", "preview.make", "clip.export"):
         info = ctx.media.probe(params.get("path"))
         if command == "video.frame":
+            output = ctx.workspace / "cache" / "frames" / (uuid.uuid4().hex + ".png")
+            if params.get("frame_index") is not None:
+                from .timecode import frame_index, frame_rate, total_frames
+                if params.get("time") is not None:
+                    raise UserError("取帧时请只填写帧号或秒数其中一种。")
+                index = frame_index(params["frame_index"], "帧号")
+                count, _ = total_frames(info, frame_rate(info))
+                if index >= count:
+                    raise UserError(f"帧号必须小于视频总帧数 {count}。")
+                return {"path": ctx.media.extract_frame_index(info["path"], index, output),
+                        "width": info["width"], "height": info["height"], "frame_index": index}
             moment = finite_number(params.get("time", 0), "取帧时间", 0)
             if moment >= info["duration"]:
                 raise UserError("取帧时间必须小于视频时长。")
-            output = ctx.workspace / "cache" / "frames" / (uuid.uuid4().hex + ".png")
             return {"path": ctx.media.extract_frame(info["path"], moment, output), "width": info["width"], "height": info["height"]}
         start, end = time_range(params.get("start"), params.get("end"), info["duration"])
         if command == "preview.make":

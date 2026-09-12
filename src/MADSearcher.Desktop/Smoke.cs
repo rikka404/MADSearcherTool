@@ -73,15 +73,27 @@ public partial class MainWindow
             Capture(Path.Combine(output, "04-settings.png"));
             var operation = Execute("Smoke cancel", async token =>
             {
-                Expect(_state.Busy && !ToolPages.IsEnabled, "运行期间禁用重复操作", checks);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                Expect(_state.Busy && ToolPages.IsEnabled && QueryBox.IsEnabled && VideoList.IsEnabled && SettingsNav.IsEnabled,
+                    "运行期间仍可浏览、编辑与导航", checks);
+                Expect(!SearchButton.IsEnabled && !IndexButton.IsEnabled && !GroupBox.IsEnabled,
+                    "运行期间禁止新增任务与分组读取", checks);
+                var duplicateStarted = false;
+                await Execute("不应启动", _ => { duplicateStarted = true; return Task.CompletedTask; });
+                Expect(!duplicateStarted, "处理入口阻止重复任务", checks);
                 _ = Dispatcher.BeginInvoke(() => CancelTask(this, new RoutedEventArgs()));
                 await Task.Delay(5000, token);
             });
             await operation;
             Expect(!_state.Busy && _state.Status.Contains("已取消"), "取消 handler 与界面恢复", checks);
             await VerifyProcessTreeCancellation(output, checks);
-            var keySettings = new AppSettings { ApiKey = "smoke-secret-must-not-persist" };
-            Expect(!JsonSerializer.Serialize(keySettings).Contains("smoke-secret"), "API Key 不参与配置序列化", checks);
+            var keySettings = new AppSettings { ApiKey = "fixture-key" };
+            var keyRoot = Path.Combine(output, "settings-fixture");
+            keySettings.Save(keyRoot);
+            Expect(AppSettings.Load(keyRoot).ApiKey == keySettings.ApiKey, "本地设置恢复 API Key", checks);
+            var snapshot = keySettings.Snapshot();
+            keySettings.ApiKey = "changed-fixture-key";
+            Expect(snapshot.ApiKey == "fixture-key", "修改设置不改变任务快照", checks);
             Width = 1160; Height = 760; Navigate("search");
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
             Capture(Path.Combine(output, "05-search-minimum-size.png"));

@@ -5,6 +5,9 @@
 /workspace/
 /artifacts/
 
+# Local feedback notes (keep on disk, outside version control)
+/Docs/优化及bug修复.md
+
 # .NET / Visual Studio build output and local state
 **/bin/
 **/obj/

@@ -203,7 +203,132 @@
       "status": "completed",
       "updated_at": "2026-09-10T14:32:36.912959+00:00",
       "evidence": "参数化CLI和原始request入口覆盖全部worker命令，增加ae.send；用户要求不测试，新入口待后续验收。"
+    },
+    {
+      "id": "usability_fixes",
+      "title": "v0.1.0后字幕、配置与运行期交互修正",
+      "depends_on": [
+        "delivery"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "确定时间点字幕、设置快照和交互边界",
+            "depends_on": [],
+            "status": "completed",
+            "evidence": "设计文档第7节；本地反馈文件退出Git跟踪。"
+          },
+          {
+            "id": "subtitles",
+            "title": "允许零时长字幕并纳入对应索引窗口",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-11T15:48:29.537754+00:00",
+            "evidence": "接受相等起止时间，时间点按半开窗口归属；倒置时间与媒体范围限制保留。静态核对，未运行测试。"
+          },
+          {
+            "id": "settings",
+            "title": "明文保存Key并与CLI配置保持一致",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-11T15:48:29.718581+00:00",
+            "evidence": "AppSettings可明文序列化ApiKey，提供任务快照；CLI读取本地Key且允许环境变量覆盖。界面恢复与保存提示随interaction接入。"
+          },
+          {
+            "id": "interaction",
+            "title": "仅禁新增任务、捕获任务参数及防止过期结果覆盖",
+            "depends_on": [
+              "settings"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-11T15:57:14.478296+00:00",
+            "evidence": "移除整页和菜单禁用，仅限制任务入口及分组/工作区切换；任务设置与各步骤输入使用快照，预览/首帧拒绝过期更新，普通设置保存保留浏览状态。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态核对、编译发布和文档更新（不运行功能测试）",
+            "depends_on": [
+              "subtitles",
+              "settings",
+              "interaction"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-11T15:58:29.005057+00:00",
+            "evidence": "16个Python文件语法编译、WPF Release编译发布成功；文档与本地反馈已更新，git diff --check通过，未运行功能测试。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-11T15:58:29.285742+00:00",
+      "evidence": "三项反馈已实现并标注完成；本地反馈文件已退出跟踪并被忽略，本地发布产物已更新，功能验收继续延期。"
+    },
+    {
+      "id": "frame_and_scroll",
+      "title": "反馈5/6：像素滚动与抠像帧精度",
+      "depends_on": [
+        "usability_fixes"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "时间码、帧区间、兼容接口与滚动方案",
+            "depends_on": [],
+            "status": "completed",
+            "evidence": "设计文档第8节；核对WPF与FFmpeg官方接口。"
+          },
+          {
+            "id": "scroll",
+            "title": "匹配卡片按像素滚动",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T04:15:44.870971+00:00",
+            "evidence": "ResultsList启用像素滚动、虚拟化及容器回收，WPF编译通过；未进行界面功能测试。"
+          },
+          {
+            "id": "frame_core",
+            "title": "共享时间码解析、CLI及按帧解码",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T04:10:11.006640+00:00",
+            "evidence": "统一时间码/帧号解析、cutout.range、首帧与批量按源帧解码及CLI已实现；Python语法编译通过，回归用例已编写未执行。"
+          },
+          {
+            "id": "frame_ui",
+            "title": "抠像时间码输入、回填与首帧一致性",
+            "depends_on": [
+              "frame_core"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T04:15:46.195745+00:00",
+            "evidence": "WPF统一调用cutout.range并回填分钟:秒:帧，首帧及抠像提交源帧号，保留输入快照和过期保护；Release编译0警告0错误。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态核对、编译发布和本地完成标记",
+            "depends_on": [
+              "scroll",
+              "frame_ui"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T04:17:17.861552+00:00",
+            "evidence": "26个Python文件语法编译、WPF Release编译0警告0错误及发布完成；使用/设计/扩展/边界/验收文档与本地5/6完成标记已更新。功能测试未运行，反馈文档仍被Git忽略。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-12T04:17:19.305391+00:00",
+      "evidence": "反馈5/6已实现并完成静态核对和发布，4/7/8待定未实现；保留本地dev改动，未提交/推送，acceptance继续延期。"
     }
   ],
-  "scope_update": "2026-09-10：本次完成实现收尾与使用文档，测试验收延期，保留历史记录。"
+  "scope_update": "2026-09-12：完成本地反馈5/6，4/7/8仍待定；功能测试继续延期。"
 }

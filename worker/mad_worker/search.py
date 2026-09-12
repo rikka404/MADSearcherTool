@@ -132,7 +132,7 @@ def _index(store, params, ctx):
     info = ctx.media.probe(path)
     if math.ceil(info["duration"] / seconds) > 20000:
         raise UserError("单次索引超过20000个时间段，请增大索引间隔或先分割长视频。")
-    config = {"version": 1, "source": list(fingerprint), "subtitle_path": str(subtitle_path) if subtitle_path else "",
+    config = {"version": 2, "source": list(fingerprint), "subtitle_path": str(subtitle_path) if subtitle_path else "",
               "subtitle_fingerprint": list(_fingerprint(subtitle_path)) if subtitle_path else None,
               "subtitle_offset": offset, "visual": visual, "semantic": semantic or visual, "transcribe": transcribe and not bool(subtitle_path),
               "language": params.get("language", "auto"), "segment_seconds": seconds, "context": group["description"],
@@ -172,13 +172,14 @@ def _index(store, params, ctx):
     segments, cue_index = [], 0
     for index in range(total):
         start, end = index * seconds, min(info["duration"], (index + 1) * seconds)
-        while cue_index < len(cues) and cues[cue_index].end <= start:
+        # Keep a point cue exactly at this window's start for this window only.
+        while cue_index < len(cues) and cues[cue_index].end <= start and cues[cue_index].start < start:
             cue_index += 1
         relevant = []
         # Overlapping cues are legal, so scan all remaining starts within this window.
         current = cue_index
         while current < len(cues) and cues[current].start < end:
-            if cues[current].end > start and cues[current].text not in relevant:
+            if cues[current].overlaps(start, end) and cues[current].text not in relevant:
                 relevant.append(cues[current].text)
             current += 1
         subtitle = "\n".join(relevant)

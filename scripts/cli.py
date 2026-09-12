@@ -24,13 +24,14 @@ COMMANDS = {
     "video.add": ("批量导入 MP4 路径", ["group_id", "paths"]),
     "video.remove": ("移除素材记录，保留原视频", ["video_id"]),
     "video.probe": ("读取视频元数据", ["path"]),
-    "video.frame": ("提取某个时间点的画面", ["path", "time"]),
+    "video.frame": ("按秒数或源帧号提取画面", ["path", "time", "frame_index"]),
     "index.run": ("为一个素材建立或恢复索引", ["video_id", "subtitle_path", "subtitle_offset",
         "transcribe", "language", "visual", "semantic", "segment_seconds"]),
     "search.run": ("在一个分组内检索镜头", ["group_id", "query", "limit", "semantic"]),
     "preview.make": ("生成可播放的 MP4 预览", ["path", "start", "end"]),
     "clip.export": ("导出指定范围的 MP4", ["path", "start", "end", "output_dir"]),
-    "cutout.run": ("执行 SAM 2 人物抠像和输出", ["path", "start", "end", "prompt_mode", "mask_path",
+    "cutout.range": ("解析抠像时间码或帧号范围，无需加载模型", ["path", "start", "end", "start_frame", "end_frame"]),
+    "cutout.run": ("执行 SAM 2 人物抠像和输出", ["path", "start", "end", "start_frame", "end_frame", "prompt_mode", "mask_path",
         "prompt", "reference_path", "box", "output_dir", "export_video", "export_ae"]),
     "ae.send": ("把已生成 JSX 派发给 After Effects（不保存工程）", ["script_path"]),
 }
@@ -67,15 +68,17 @@ def parser_for_cli():
         child = commands.add_parser(command, help=description, description=description)
         child.add_argument("--params-file", help="UTF-8 JSON 参数文件；- 表示标准输入。显式参数优先。")
         child.add_argument("--workspace", help="工作区目录，默认使用桌面端设置或项目 workspace。")
-        child.add_argument("--settings", help="普通设置 JSON，可用桌面 PascalCase 或 worker snake_case；不加载密钥。")
+        child.add_argument("--settings", help="本地设置 JSON，可用桌面 PascalCase 或 worker snake_case，支持已保存的 API Key。")
         for name in SETTINGS.values():
             choices = ["cpu", "cuda"] if name in ("device", "whisper_device") else None
             child.add_argument("--" + name.replace("_", "-"), choices=choices, default=None)
         for field in fields:
             options = {"default": None}
-            if field in FLOATS:
+            if field in ("start", "end") and command.startswith("cutout."):
+                options["help"] = "分钟:秒:帧（终点不含该帧），或小数秒；不能与帧号参数混用"
+            elif field in FLOATS:
                 options["type"] = float
-            elif field == "limit":
+            elif field in ("limit", "frame_index", "start_frame", "end_frame"):
                 options["type"] = int
             elif field in FLAGS:
                 options["action"] = argparse.BooleanOptionalAction
@@ -105,7 +108,10 @@ def compose_request(args):
                 if snake in stored or pascal in stored}
     settings = {key: value for key, value in settings.items() if value is not None}
     settings.update({key: getattr(args, key) for key in SETTINGS.values() if getattr(args, key) is not None})
-    settings["api_key"] = os.environ.get("OPENAI_API_KEY", "")
+    # An explicitly empty environment variable disables a saved key for this call.
+    settings["api_key"] = os.environ.get("OPENAI_API_KEY", stored.get("api_key", stored.get("ApiKey", ""))) or ""
+    if not isinstance(settings["api_key"], str):
+        raise UserError("API Key 必须是字符串。")
     checkpoint = ROOT / "models" / "sam2.1_hiera_tiny.pt"
     if not settings.get("sam_checkpoint") and checkpoint.is_file():
         settings["sam_checkpoint"] = str(checkpoint)
@@ -125,8 +131,11 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = parser_for_cli().parse_args()
+    secret = ""
     try:
         request = compose_request(args)
+        if isinstance(request.get("settings"), dict):
+            secret = str(request["settings"].get("api_key") or "")
         os.environ.setdefault("HF_HOME", str(ROOT / "models" / "huggingface"))
         os.environ.setdefault("TORCH_HOME", str(ROOT / "models" / "torch"))
         # Reuse the exact worker error redaction and stdout isolation contract.
@@ -142,9 +151,9 @@ def main():
         return 130
     except (UserError, ValueError, OSError) as exc:
         message = str(exc)
-        key = os.environ.get("OPENAI_API_KEY", "")
-        if key:
-            message = message.replace(key, "[已隐藏密钥]")
+        for key in (secret, os.environ.get("OPENAI_API_KEY", "")):
+            if key:
+                message = message.replace(key, "[已隐藏密钥]")
         print(json.dumps({"type": "error", "code": getattr(exc, "code", "validation"), "message": message}, ensure_ascii=False), flush=True)
         return 1
 

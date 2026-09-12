@@ -16,6 +16,7 @@ from mad_worker import cutout, exporters
 from mad_worker.context import Context
 from mad_worker.errors import UserError
 from mad_worker.media import Media
+from mad_worker.timecode import resolve_range
 
 
 class CutoutInputTests(unittest.TestCase):
@@ -68,6 +69,36 @@ class CutoutInputTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_source_frame_selection_matches_preview_and_includes_last_frame(self):
+        # Deferred regression fixture: distinct lossless frames reveal off-by-one
+        # selection and accidental frame duplication at a fractional frame rate.
+        with tempfile.TemporaryDirectory(prefix="MAD帧范围 ") as directory:
+            directory = Path(directory)
+            inputs = directory / "inputs"
+            inputs.mkdir()
+            colours = [(20 + i * 30, 70, 110) for i in range(6)]
+            for index, colour in enumerate(colours):
+                Image.new("RGB", (32, 24), colour).save(inputs / f"{index:06d}.png")
+            ctx = Context(str(directory / "workspace"))
+            source = directory / "source.mkv"
+            ctx.media.run(["-framerate", "24000/1001", "-i", inputs / "%06d.png",
+                           "-c:v", "ffv1", "-pix_fmt", "bgr0", source])
+            info = ctx.media.probe(source)
+            selection = resolve_range({"start_frame": 4, "end_frame": 6}, info)
+            frames = cutout._decode_frames(ctx, info, selection, directory / "selected")
+            self.assertEqual(len(frames), 2)
+            for frame, expected in zip(frames, colours[4:]):
+                with Image.open(frame) as image:
+                    self.assertEqual(image.convert("RGB").getpixel((0, 0)), expected)
+            preview = ctx.media.extract_frame_index(source, 4, directory / "first.png")
+            with Image.open(preview) as image, Image.open(frames[0]) as first:
+                np.testing.assert_array_equal(np.asarray(image.convert("RGB")), np.asarray(first.convert("RGB")))
+            # Inaccurate container counts must not turn an empty decode into success.
+            estimated = {**info, "frame_count": 7}
+            missing = resolve_range({"start_frame": 6, "end_frame": 7}, estimated)
+            with self.assertRaises(UserError):
+                cutout._decode_frames(ctx, info, missing, directory / "missing")
+
     def test_rgba_preserves_straight_colour_and_partial_alpha(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)

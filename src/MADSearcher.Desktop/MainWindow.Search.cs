@@ -11,13 +11,15 @@ namespace MADSearcher.Desktop;
 public partial class MainWindow
 {
     private bool _loadingGroups;
+    private string _libraryWorkspace = "";
+    private long _previewVersion;
     private string _previewSource = "";
     private string _previewFile = "";
 
     private GroupInfo RequireGroup() => GroupBox.SelectedItem as GroupInfo ?? throw new InvalidOperationException("请先新建或选择一个动画分组。");
     private VideoInfo RequireVideo() => VideoList.SelectedItem as VideoInfo ?? throw new InvalidOperationException("请先在素材列表中选择一个视频。");
 
-    private async Task LoadGroups(CancellationToken token, string? selectId = null)
+    private async Task LoadGroups(CancellationToken token, string? selectId = null, bool preserveInputs = true)
     {
         selectId ??= (GroupBox.SelectedItem as GroupInfo)?.Id;
         var data = await Call("group.list", new
@@ -35,15 +37,15 @@ public partial class MainWindow
         {
             _loadingGroups = false;
         }
-        await LoadVideos(token);
+        _libraryWorkspace = OperationSettings.Workspace;
+        await LoadVideos(token, preserveInputs: preserveInputs);
     }
 
-    private async Task LoadVideos(CancellationToken token, string? selectId = null)
+    private async Task LoadVideos(CancellationToken token, string? selectId = null, bool preserveInputs = false)
     {
-        selectId ??= (VideoList.SelectedItem as VideoInfo)?.Id;
-        _state.Videos.Clear();
         if (GroupBox.SelectedItem is not GroupInfo group)
         {
+            _state.Videos.Clear();
             _state.LibraryHint = "先创建分组，再批量导入动画素材。";
             return;
         }
@@ -51,14 +53,25 @@ public partial class MainWindow
         {
             group_id = group.Id
         }, token);
+        var previous = VideoList.SelectedItem as VideoInfo;
+        selectId ??= previous?.Id;
+        var subtitle = SubtitleBox.Text;
+        var offset = OffsetBox.Text;
+        _state.Videos.Clear();
         foreach (var item in Items<VideoInfo>(data, "videos"))
             _state.Videos.Add(item);
         VideoList.SelectedItem = _state.Videos.FirstOrDefault(v => v.Id == selectId) ?? _state.Videos.FirstOrDefault();
+        if (preserveInputs && previous != null && (VideoList.SelectedItem as VideoInfo)?.Id == previous.Id)
+        {
+            SubtitleBox.Text = subtitle;
+            OffsetBox.Text = offset;
+        }
         _state.LibraryHint = $"{group.Name} · {_state.Videos.Count} 个视频\n{group.Description}".Trim();
     }
 
     private void ClearResults()
     {
+        _previewVersion++;
         _state.Results.Clear();
         _state.ResultHint = "输入人物、场景或台词，定位属于你的镜头。";
         _previewSource = "";
@@ -114,6 +127,8 @@ public partial class MainWindow
     }
     private async void CreateGroup(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         var value = EditGroupDialog(null);
         if (value == null)
             return;
@@ -131,6 +146,8 @@ public partial class MainWindow
     }
     private async void EditGroup(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         if (GroupBox.SelectedItem is not GroupInfo group)
         {
             _state.Status = "请先选择分组。";
@@ -143,6 +160,8 @@ public partial class MainWindow
     }
     private async void DeleteGroup(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         if (GroupBox.SelectedItem is not GroupInfo group)
         {
             _state.Status = "请先选择分组。";
@@ -154,6 +173,8 @@ public partial class MainWindow
     }
     private async void ImportVideos(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         if (GroupBox.SelectedItem is not GroupInfo group)
         {
             _state.Status = "请先创建或选择动画分组，再导入素材。";
@@ -183,6 +204,8 @@ public partial class MainWindow
     }
     private async void RemoveVideo(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         if (VideoList.SelectedItem is not VideoInfo video)
         {
             _state.Status = "请先选择要移除的素材。";
@@ -202,7 +225,11 @@ public partial class MainWindow
         var offset = Parse(OffsetBox.Text, "字幕偏移");
         if (Math.Abs(offset) > 86400)
             throw new InvalidOperationException("字幕偏移应在正负 86400 秒以内。");
-        if ((VisualCheck.IsChecked == true || SemanticIndexCheck.IsChecked == true) && string.IsNullOrWhiteSpace(_state.Settings.ApiKey))
+        var visual = VisualCheck.IsChecked == true;
+        var semantic = SemanticIndexCheck.IsChecked == true;
+        var transcribe = AsrCheck.IsChecked == true;
+        var language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto";
+        if ((visual || semantic) && string.IsNullOrWhiteSpace(OperationSettings.ApiKey))
             throw new InvalidOperationException("AI 画面或语义索引需要 OpenAI API Key，请先在设置中填写。纯字幕关键词索引无需密钥。");
         var subtitle = SubtitleBox.Text.Trim();
         if (subtitle.Length > 0)
@@ -218,17 +245,17 @@ public partial class MainWindow
                 video_id = video.Id,
                 subtitle_path = video.Id == selected.Id ? subtitle : video.SubtitlePath ?? "",
                 subtitle_offset = video.Id == selected.Id ? offset : video.SubtitleOffset,
-                transcribe = AsrCheck.IsChecked == true,
-                language = (LanguageBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto",
-                visual = VisualCheck.IsChecked == true,
-                semantic = SemanticIndexCheck.IsChecked == true,
+                transcribe,
+                language,
+                visual,
+                semantic,
                 segment_seconds = 8
             }, token);
             total += data.GetProperty("segment_count").GetInt32();
             if (Warnings(data).Length > 0)
                 warnings.Add(video.Name + "：" + Warnings(data));
         }
-        await LoadGroups(token);
+        await LoadGroups(token, preserveInputs: true);
         ClearResults();
         _state.Status = $"已完成 {targets.Length} 个素材、{total} 个片段的索引。" + string.Join("；", warnings);
     });
@@ -248,7 +275,7 @@ public partial class MainWindow
         var query = QueryBox.Text.Trim();
         if (query.Length == 0)
             throw new InvalidOperationException("请输入要查找的人物、场景、情节或台词。");
-        if (SemanticCheck.IsChecked == true && string.IsNullOrWhiteSpace(_state.Settings.ApiKey))
+        if (SemanticCheck.IsChecked == true && string.IsNullOrWhiteSpace(OperationSettings.ApiKey))
             throw new InvalidOperationException("语义检索需要在设置中填写 OpenAI API Key。取消语义检索后可使用本地关键词匹配。");
         var data = await Call("search.run", new
         {
@@ -261,13 +288,14 @@ public partial class MainWindow
         ClearResults();
         foreach (var item in Items<SearchHit>(data, "results"))
             _state.Results.Add(item);
-        _state.ResultHint = _state.Results.Count == 0 ? "没有匹配片段。尝试台词关键词，或为素材建立 AI 视觉索引。" : $"{_state.Results.Count} 个匹配 · {group.Name}";
+        _state.ResultHint = _state.Results.Count == 0 ? $"“{query}”没有匹配片段。尝试台词关键词，或建立 AI 视觉索引。" : $"{_state.Results.Count} 个匹配 · {group.Name} · {query}";
         _state.Status = $"检索完成。{Warnings(data)}";
         if (_state.Results.Count > 0)
             ResultsList.SelectedIndex = 0;
     });
     private void ResultChanged(object sender, SelectionChangedEventArgs e)
     {
+        _previewVersion++;
         if (ResultsList.SelectedItem is not SearchHit hit)
             return;
         _previewSource = hit.Path;
@@ -280,18 +308,21 @@ public partial class MainWindow
         PreviewName.Text = hit.Name + "\n" + hit.Timing;
         PreviewPathLabel.Text = hit.Path;
     }
+    private void PreviewInputsChanged(object sender, TextChangedEventArgs e) => _previewVersion++;
     private async Task<(string Path, double Start, double End)> PreviewRange(CancellationToken token)
     {
         var path = RequireFile(_previewSource, "预览源视频");
+        var selectedRange = Range(PreviewStart, PreviewEnd);
         var info = await Call("video.probe", new
         {
             path
         }, token);
-        var range = Range(PreviewStart, PreviewEnd, info.GetProperty("duration").GetDouble());
+        var range = Range(selectedRange.Start, selectedRange.End, info.GetProperty("duration").GetDouble());
         return (path, range.Start, range.End);
     }
     private async void MakePreview(object sender, RoutedEventArgs e) => await Execute("正在生成预览…", async token =>
     {
+        var version = _previewVersion;
         var range = await PreviewRange(token);
         if (range.End - range.Start > 300)
             throw new InvalidOperationException("预览最长 300 秒，请缩短范围。");
@@ -301,14 +332,22 @@ public partial class MainWindow
             start = range.Start,
             end = range.End
         }, token);
+        if (version != _previewVersion)
+        {
+            _state.Status = "预览已生成，但当前选择或时间范围已更改。请为新选择生成预览。";
+            return;
+        }
         _previewFile = Text(data, "path");
         PreviewStill.Source = null;
         PreviewPlayer.Source = new Uri(_previewFile);
-        PreviewPlayer.Play();
+        if (SearchPage.Visibility == Visibility.Visible)
+            PreviewPlayer.Play();
         _state.Status = "预览已生成。可调整起止后再次预览，或导出片段。";
     });
     private async void ExportClip(object sender, RoutedEventArgs e)
     {
+        if (_state.Busy)
+            return;
         if (string.IsNullOrEmpty(_previewSource))
         {
             _state.Status = "请先选择一个检索结果。";
@@ -319,6 +358,7 @@ public partial class MainWindow
             return;
         await Execute("正在导出 MP4…", async token =>
         {
+            var version = _previewVersion;
             var range = await PreviewRange(token);
             var data = await Call("clip.export", new
             {
@@ -327,14 +367,16 @@ public partial class MainWindow
                 end = range.End,
                 output_dir = output
             }, token);
-            PreviewPathLabel.Text = "已导出：" + Text(data, "path");
+            if (version == _previewVersion)
+                PreviewPathLabel.Text = "已导出：" + Text(data, "path");
             _state.Status = "MP4 已导出到 " + Text(data, "path");
         });
     }
     private async void SendToCutout(object sender, RoutedEventArgs e) => await Execute("正在准备抠像片段…", async token =>
     {
-        var range = await PreviewRange(token);
-        CutPathBox.Text = range.Path;
+        var path = RequireFile(_previewSource, "预览源视频");
+        var range = Range(PreviewStart, PreviewEnd, maxLength: 120);
+        CutPathBox.Text = path;
         CutStartBox.Text = Number(range.Start);
         CutEndBox.Text = Number(range.End);
         Navigate("cutout");
