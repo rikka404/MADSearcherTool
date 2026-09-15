@@ -56,7 +56,8 @@ public partial class MainWindow
             _smokeExportDirectory = Path.Combine(output, "exports"); ExportClip(this, new RoutedEventArgs()); await _lastOperation;
             Expect(Directory.GetFiles(_smokeExportDirectory, "*.mp4").Length > 0, "MP4 片段导出 handler", checks);
             SendToCutout(this, new RoutedEventArgs()); await _lastOperation;
-            Expect(CutoutPage.Visibility == Visibility.Visible && CutFirstFrame.Source != null, "送入抠像、探测与首帧 handler", checks);
+            // Preview decoding is asynchronous; this check covers media setup, not frame readiness.
+            Expect(CutoutPage.Visibility == Visibility.Visible && SourcePreview.Media != null, "送入抠像、探测与预览媒体载入 handler", checks);
             PromptModeBox.SelectedIndex = 1;
             Expect(BoxInputs.Visibility == Visibility.Visible && MaskInputs.Visibility == Visibility.Collapsed, "提示模式切换", checks);
             CutEndBox.Text = "NaN"; RunCutout(this, new RoutedEventArgs()); await _lastOperation;

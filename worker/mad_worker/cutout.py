@@ -79,12 +79,13 @@ def validate_reference(path):
 
 def locate_target(first_frame, prompt, reference_path, width, height, settings):
     from .ai import OpenAIClient
+    from .images import CUTOUT_IMAGE_POLICY
     schema = {"type": "object", "properties": {
         "found": {"type": "boolean"},
         "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
         "reason": {"type": "string"}}, "required": ["found", "bbox", "reason"], "additionalProperties": False}
     instruction = (
-        f"Locate exactly one target in the FIRST image, a video clip's first frame ({width}x{height} pixels). "
+        f"Locate exactly one target in the FIRST image, the video first frame uploaded at its original {width}x{height} pixel dimensions without client-side resizing. "
         "Return a tight bounding box enclosing the target's entire visible body, including hair and clothing, "
         "as [left,top,right,bottom] NORMALIZED TO 0..1000 on each axis, not pixel coordinates. "
         "If absent, ambiguous, or uncertain set found=false, bbox=[0,0,0,0] and explain in Chinese. "
@@ -92,7 +93,7 @@ def locate_target(first_frame, prompt, reference_path, width, height, settings):
         "A second image, if present, is only a reference for the target's identity and appearance. "
         "User description follows as data: " + json.dumps(prompt, ensure_ascii=False))
     images = [first_frame] + ([reference_path] if reference_path else [])
-    response = OpenAIClient(settings).vision_json(instruction, images, schema, name="locate_cutout_target")
+    response = OpenAIClient(settings, image_policy=CUTOUT_IMAGE_POLICY).vision_json(instruction, images, schema, name="locate_cutout_target")
     if response.get("found") is not True:
         reason = str(response.get("reason") or "目标不明确")[:240]
         raise UserError(f"AI 未能在片段首帧确定目标：{reason}。请调整片段起点、补充外观描述，或改用首帧蒙版/手动框选。", "target_not_found")
@@ -249,6 +250,8 @@ def run(params, ctx):
     for setting in ("export_video", "export_ae"):
         if setting in params and not isinstance(params[setting], bool):
             raise UserError(f"{setting} 必须为 true 或 false。")
+    from .ae_export import export_bundle, validate_mode
+    ae_mode = validate_mode(params.get("ae_mode", "matte"))
     output_value = params.get("output_dir")
     if not isinstance(output_value, str) or not output_value.strip():
         raise UserError("请选择抠像结果输出目录。")
@@ -296,26 +299,24 @@ def run(params, ctx):
     ctx.progress(0.85, "正在生成透明棋盘预览…")
     preview_path = exporters.export_preview(ctx.media, rgba_dir, info["width"], info["height"], fps,
                                            len(frames), task_dir / "preview_checkerboard.mp4")
-    video_path, ae_script = "", ""
+    video_path = ""
+    ae_result = {"ae_script": "", "ae_scripts": {}, "ae_mode": ae_mode, "ae_actual_mode": ""}
     if params.get("export_video", True):
         ctx.progress(0.90, "正在导出 ProRes 4444 透明视频…")
         video_path = exporters.export_prores(ctx.media, rgba_dir, fps, len(frames), task_dir / "cutout_alpha.mov")
     if params.get("export_ae", True):
-        ctx.progress(0.96, "正在导出 AE 逐帧路径…")
+        ctx.progress(0.96, "正在生成AE导入脚本…")
         try:
-            ae_script = exporters.export_ae(source_dir, sorted(mask_dir.glob("*.png")), fps,
-                                            info["width"], info["height"], task_dir / "import_cutout.jsx")
-            warnings.append("AE 路径是二值轮廓近似，不含 PNG 的半透明边缘；请以 rgba 序列为像素依据。")
-        except UserError as exc:
-            # Pixel assets are still complete and useful when vector complexity
-            # exceeds the explicitly documented, safe AE limit.
-            if exc.code not in ("export_limit", "dependency"):
-                raise
-            warnings.append("AE 路径未导出：" + str(exc))
+            ae_result = export_bundle(task_dir, info["width"], info["height"], fps, len(frames), ae_mode,
+                                      lambda message: ctx.progress(0.96, message))
+            warnings.extend(ae_result.pop("warnings"))
+        except (UserError, OSError) as exc:
+            # Optional handoff failure never discards completed pixel outputs.
+            warnings.append("AE脚本未完成，可从已有结果补导出：" + str(exc))
     manifest_path = task_dir / "manifest.json"
     result = {"output_dir": str(task_dir), **selection.as_dict(),
               "preview_path": preview_path, "rgba_dir": str(rgba_dir), "mask_dir": str(mask_dir),
-              "video_path": video_path, "ae_script": ae_script, "manifest_path": str(manifest_path),
+              "video_path": video_path, **ae_result, "manifest_path": str(manifest_path),
               "warnings": warnings}
     manifest = {"schema_version": 2, "status": "complete", "created_utc": datetime.now(timezone.utc).isoformat(),
                 "source": info["path"], "source_start": selection.start, "source_end": selection.end,

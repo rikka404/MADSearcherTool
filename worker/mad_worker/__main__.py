@@ -2,7 +2,6 @@ import contextlib
 import hashlib
 import importlib.util
 import json
-import os
 import platform
 import sys
 import uuid
@@ -13,6 +12,9 @@ from .validation import finite_number, time_range
 
 
 def handle(command, params, ctx):
+    if command in ("storage.scan", "storage.clean"):
+        from .storage import scan, clean
+        return (scan if command == "storage.scan" else clean)(params, ctx)
     if command == "system.check":
         checks = []
         for name in ("ffmpeg", "ffprobe"):
@@ -22,7 +24,7 @@ def handle(command, params, ctx):
             except UserError as exc:
                 checks.append({"name": name, "ok": False, "message": str(exc)})
         for module, label in (("numpy", "NumPy"), ("PIL", "Pillow"), ("cv2", "OpenCV"),
-                              ("torch", "PyTorch"), ("sam2", "SAM 2"), ("faster_whisper", "faster-whisper")):
+                              ("scenedetect", "PySceneDetect"), ("torch", "PyTorch"), ("sam2", "SAM 2"), ("faster_whisper", "faster-whisper")):
             ok = importlib.util.find_spec(module) is not None
             checks.append({"name": label, "ok": ok, "message": "已安装" if ok else "未安装；请运行 scripts/setup.ps1 对应依赖选项"})
         checkpoint = str(ctx.settings.get("sam_checkpoint") or "")
@@ -37,6 +39,9 @@ def handle(command, params, ctx):
         from .timecode import resolve_range
         info = ctx.media.probe(params.get("path"))
         return {"video": info, **resolve_range(params, info).as_dict()}
+    if command == "cutout.export_ae":
+        from .ae_export import reexport
+        return reexport(params, ctx)
     if command in ("video.frame", "preview.make", "clip.export"):
         info = ctx.media.probe(params.get("path"))
         if command == "video.frame":
@@ -109,7 +114,8 @@ def main():
         if isinstance(settings, dict):
             secret = str(settings.get("api_key") or "")
         ctx = Context(request.get("workspace"), settings, emit)
-        with contextlib.redirect_stdout(sys.stderr):
+        from .activity import workspace_activity
+        with contextlib.redirect_stdout(sys.stderr), workspace_activity(ctx.workspace, exclusive=command == "storage.clean"):
             data = handle(command, params, ctx)
         emit({"type": "result", "data": data})
         return 0

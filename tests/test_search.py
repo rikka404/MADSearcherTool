@@ -1,6 +1,5 @@
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -37,7 +36,9 @@ class SearchTests(unittest.TestCase):
         return self.call("index.run", **({"video_id": self.video["id"], "subtitle_path": str(self.subtitle), "segment_seconds": 2} | params))
 
     def search(self, query, **params):
-        return self.call("search.run", **({"group_id": self.group["id"], "query": query} | params))
+        # Keep these historical scene-window contracts explicit; dialogue/default modes
+        # have their own deferred cases in test_dialogue.py.
+        return self.call("search.run", **({"group_id": self.group["id"], "query": query, "mode": "scene"} | params))
 
     def test_real_subtitles_thumbnails_temporal_merge_and_group_isolation(self):
         indexed = self.index()
@@ -114,12 +115,12 @@ class SearchTests(unittest.TestCase):
         self.ctx.settings["api_key"] = "test-never-sent"
         client = types.SimpleNamespace(vision_model="fixture-vision", embedding_model="fixture-embed")
         calls = []
-        def fail_second(images, subtitle, context):
+        def fail_second(images, subtitle, context, characters, **sampling):
             calls.append(subtitle)
             if len(calls) == 2:
                 raise UserError("模拟外部服务中断", "network")
-            return "车站蓝发女孩"
-        client.caption = fail_second
+            return {"caption": "车站蓝发女孩", "character_matches": []}
+        client.analyze_clip = fail_second
         client.embed = lambda texts: [[1.0, 0.0] for _ in texts]
         with patch("mad_worker.search.OpenAIClient", return_value=client), self.assertRaises(UserError):
             self.index(visual=True)
@@ -127,7 +128,7 @@ class SearchTests(unittest.TestCase):
         with Store(self.ctx.workspace) as store:
             self.assertEqual(store.connection.execute("SELECT count(*) FROM segments").fetchone()[0], 3)
         recovered_calls = []
-        client.caption = lambda images, subtitle, context: recovered_calls.append(subtitle) or "车站蓝发女孩"
+        client.analyze_clip = lambda images, subtitle, context, characters, **sampling: recovered_calls.append(subtitle) or {"caption": "车站蓝发女孩", "character_matches": []}
         with patch("mad_worker.search.OpenAIClient", return_value=client):
             result = self.index(visual=True)
         self.assertEqual(result["segment_count"], 4)
@@ -144,6 +145,9 @@ class SearchTests(unittest.TestCase):
             result = self.search("train", semantic=True)
         self.assertTrue(result["results"])
         self.assertEqual(result["results"][0]["match_type"], "语义")
+        self.ctx.settings["embedding_model"] = " fixture-embed "
+        with patch("mad_worker.search.OpenAIClient", side_effect=AssertionError("cached query should not need a second request")):
+            self.assertEqual(self.search("train", semantic=True)["results"][0]["match_type"], "语义")
         self.ctx.settings["embedding_model"] = "different-model"
         with patch("mad_worker.search.OpenAIClient", side_effect=AssertionError("must not invoke mismatched model")):
             result = self.search("电车", semantic=True)
@@ -217,6 +221,33 @@ class SearchTests(unittest.TestCase):
         events = [json.loads(line) for line in finished.stdout.splitlines()]
         self.assertEqual(events[-1]["type"], "result")
         self.assertEqual(events[-1]["data"]["segment_count"], 3)
+
+
+    def test_shot_results_keep_cuts_and_include_silent_neighbours(self):
+        detection = {"key": "fixture-shots", "pts": [i / 5 for i in range(40)],
+                     "cuts": [0, 10, 20, 30], "change": [0] * 40, "light": [128] * 40, "filtered_flash_cuts": 0}
+        with patch("mad_worker.segmentation.detect", return_value=detection):
+            self.index(segmentation="shot")
+        hits = self.search("电车")["results"]
+        self.assertEqual(len(hits), 2, "adjacent true shots must remain separate")
+        self.assertEqual({(h["start"], h["end"]) for h in hits}, {(0, 2), (2, 4)})
+        second = next(h for h in hits if h["start"] == 2)
+        self.assertEqual((second["context_start"], second["context_end"]), (0, 6))
+        with Store(self.ctx.workspace) as store:
+            self.assertEqual(len(store.shot_ranges(self.group["id"])[self.video["id"]]), 4)
+
+    def test_unchanged_shots_reuse_analysis_after_maximum_length_changes(self):
+        detection = {"key": "fixture-shots", "pts": [i / 5 for i in range(40)],
+                     "cuts": [0, 10, 20, 30], "change": [0] * 40, "light": [128] * 40, "filtered_flash_cuts": 0}
+        client = types.SimpleNamespace(vision_model="fixture-vision", embedding_model="fixture-embed",
+            analyze_clip=lambda *args, **kwargs: {"caption": "车站蓝发女孩", "character_matches": []},
+            embed=lambda texts: [[1.0, 0.0] for _ in texts])
+        with patch("mad_worker.segmentation.detect", return_value=detection), patch("mad_worker.search.OpenAIClient", return_value=client):
+            self.index(segmentation="shot", shot_max_seconds=20, visual=True)
+            client.analyze_clip = lambda *args, **kwargs: self.fail("unchanged shot must use its content cache")
+            client.embed = lambda *args, **kwargs: self.fail("cached vector must be reused")
+            result = self.index(segmentation="shot", shot_max_seconds=10, visual=True)
+        self.assertEqual(result["image_estimate"]["pending_visual_requests"], 0)
 
 
 if __name__ == "__main__":

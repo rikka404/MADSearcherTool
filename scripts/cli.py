@@ -16,9 +16,11 @@ from mad_worker.errors import UserError
 # does not duplicate validation, persistence, model calls, or export logic.
 COMMANDS = {
     "system.check": ("检查本地依赖和配置", []),
+    "storage.scan": ("扫描可清理缓存，返回容量、保护情况及扫描令牌", ["protected_paths"]),
+    "storage.clean": ("按已确认的扫描令牌清理缓存，保留索引和任务结果", ["plan_token", "protected_paths"]),
     "group.list": ("列出动画分组", []),
-    "group.create": ("创建动画分组", ["name", "description"]),
-    "group.update": ("更新分组名称和角色说明", ["group_id", "name", "description"]),
+    "group.create": ("创建动画分组", ["name", "description", "characters"]),
+    "group.update": ("更新分组名称和角色资料", ["group_id", "name", "description", "characters"]),
     "group.delete": ("删除分组和库记录，保留原视频", ["group_id"]),
     "video.list": ("列出一个分组的素材", ["group_id"]),
     "video.add": ("批量导入 MP4 路径", ["group_id", "paths"]),
@@ -26,16 +28,18 @@ COMMANDS = {
     "video.probe": ("读取视频元数据", ["path"]),
     "video.frame": ("按秒数或源帧号提取画面", ["path", "time", "frame_index"]),
     "index.run": ("为一个素材建立或恢复索引", ["video_id", "subtitle_path", "subtitle_offset",
-        "transcribe", "language", "visual", "semantic", "segment_seconds"]),
-    "search.run": ("在一个分组内检索镜头", ["group_id", "query", "limit", "semantic"]),
+        "transcribe", "language", "visual", "semantic", "segment_seconds", "segmentation", "shot_max_seconds", "scene_sensitivity"]),
+    "index.dialogue": ("仅补建一个素材的独立台词索引，复用字幕且不分析画面", ["video_id", "subtitle_path", "subtitle_offset", "semantic"]),
+    "search.run": ("在一个分组内检索镜头", ["group_id", "query", "character_id", "limit", "semantic", "mode"]),
     "preview.make": ("生成可播放的 MP4 预览", ["path", "start", "end"]),
     "clip.export": ("导出指定范围的 MP4", ["path", "start", "end", "output_dir"]),
     "cutout.range": ("解析抠像时间码或帧号范围，无需加载模型", ["path", "start", "end", "start_frame", "end_frame"]),
     "cutout.run": ("执行 SAM 2 人物抠像和输出", ["path", "start", "end", "start_frame", "end_frame", "prompt_mode", "mask_path",
-        "prompt", "reference_path", "box", "output_dir", "export_video", "export_ae"]),
+        "prompt", "reference_path", "box", "output_dir", "export_video", "export_ae", "ae_mode"]),
+    "cutout.export_ae": ("从已有抠像manifest补导出AE脚本，不重跑模型或媒体处理", ["manifest_path", "ae_mode"]),
     "ae.send": ("把已生成 JSX 派发给 After Effects（不保存工程）", ["script_path"]),
 }
-FLOATS = {"time", "start", "end", "subtitle_offset", "segment_seconds"}
+FLOATS = {"time", "start", "end", "subtitle_offset", "segment_seconds", "shot_max_seconds"}
 FLAGS = {"transcribe", "visual", "semantic", "export_video", "export_ae"}
 SETTINGS = {
     "FfmpegPath": "ffmpeg_path", "FfprobePath": "ffprobe_path", "VisionModel": "vision_model",
@@ -74,6 +78,9 @@ def parser_for_cli():
             child.add_argument("--" + name.replace("_", "-"), choices=choices, default=None)
         for field in fields:
             options = {"default": None}
+            if field == "characters":
+                # Complex cards and image paths use the existing UTF-8 JSON adapter.
+                continue
             if field in ("start", "end") and command.startswith("cutout."):
                 options["help"] = "分钟:秒:帧（终点不含该帧），或小数秒；不能与帧号参数混用"
             elif field in FLOATS:
@@ -82,12 +89,21 @@ def parser_for_cli():
                 options["type"] = int
             elif field in FLAGS:
                 options["action"] = argparse.BooleanOptionalAction
-            elif field == "paths":
+            elif field in ("paths", "protected_paths"):
                 options["nargs"] = "+"
             elif field == "box":
                 options.update(nargs=4, type=float, metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"))
             elif field == "prompt_mode":
                 options["choices"] = ["mask", "box", "text", "reference"]
+            elif field == "segmentation":
+                options["choices"] = ["shot", "fixed"]
+            elif field == "scene_sensitivity":
+                options["choices"] = ["low", "medium", "high"]
+            elif field == "mode":
+                options["choices"] = ["combined", "dialogue", "scene"]
+            elif field == "ae_mode":
+                options["choices"] = ["rgba", "matte", "paths"]
+                options["help"] = "AE交接方式；默认matte（原画＋独立Alpha修补遮罩）"
             child.add_argument("--" + field.replace("_", "-"), **options)
     raw = commands.add_parser("request", help="执行完整原始请求 JSON（脚本集成入口）")
     raw.add_argument("--request-file", required=True, help="UTF-8 请求文件；- 表示标准输入。")
@@ -120,7 +136,7 @@ def compose_request(args):
         raise UserError("工作区必须为有效路径。")
     workspace = str(Path(workspace).expanduser().resolve())
     params = read_json(args.params_file) if args.params_file else {}
-    params.update({field: getattr(args, field) for field in COMMANDS[args.command][1] if getattr(args, field) is not None})
+    params.update({field: getattr(args, field) for field in COMMANDS[args.command][1] if getattr(args, field, None) is not None})
     if args.command in ("clip.export", "cutout.run"):
         params.setdefault("output_dir", str(Path(workspace) / "exports"))
     return {"command": args.command, "params": params, "settings": settings, "workspace": workspace}

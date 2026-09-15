@@ -46,6 +46,102 @@ class SubtitleTests(unittest.TestCase):
         cues, _ = parse_subtitles(self.write("1\n00:00:01,000 --> 00:00:02,000\n中文电车\n", encoding="gb18030"))
         self.assertEqual(cues[0].text, "中文电车")
 
+    # Regression sources below are deferred along with functional acceptance.
+    def ass(self, *events):
+        return self.write("[Events]\n" + "\n".join(events), ".ass")
+
+    def test_ass_drawing_state_preserves_visible_text_and_vector_clips(self):
+        path = self.ass(
+            r"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\p1}m 0 0 l 5 5\N{\bord2}l 9 9{\p0}保留\N台词",
+            r"Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\p1}m 0 0{\rDefault}重置后的文字",
+            r"Dialogue: 0,0:00:06.00,0:00:07.00,Default,,0,0,0,,{\pos(20,30)\clip(m 0 0 l 5 5)\pbo2\t(0,50,\clip(1,2,3,4)\p1)}裁剪后的文字",
+            r"Dialogue: 0,0:00:08.00,0:00:09.00,Default,,0,0,0,,{\p1\p0}同块恢复",
+            r"Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,{\p0\p1}m 0 0 l 1 1",
+            "Comment: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,karaoke,不恢复模板")
+        stats = {}
+        cues, warnings = parse_subtitles(path, diagnostics=stats)
+        self.assertEqual([c.text for c in cues], ["保留 台词", "重置后的文字", "裁剪后的文字", "同块恢复"])
+        self.assertEqual(cues[0].lines, ("保留", "台词"))
+        self.assertEqual(stats["raw_events"], 5)
+        self.assertEqual(stats["drawing_only_removed"], 1)
+        self.assertEqual(stats["ignored_comments"], 1)
+        self.assertEqual(stats["effective_cues"], 4)
+        self.assertTrue(warnings)
+        self.assertNotIn("裁剪后的文字", str(stats))
+
+    def test_ass_fx_layers_merge_but_later_occurrence_is_separate(self):
+        path = self.ass(
+            r"Dialogue: 0,0:00:01.00,0:00:01.04,OP_CH,,0,0,0,fx,{\bord2}重复歌词",
+            r"Dialogue: 1,0:00:01.00,0:00:01.04,OP_CH,,0,0,0,fx,{\bord4}重复歌词",
+            "Dialogue: 0,0:00:01.04,0:00:01.08,OP_CH,,0,0,0,fx,重复歌词",
+            "Dialogue: 0,0:00:01.08,0:00:01.12,OP_CH,,0,0,0,fx,重复歌词",
+            "Dialogue: 0,0:00:10.00,0:00:10.04,OP_CH,,0,0,0,fx,重复歌词",
+            "Dialogue: 0,0:00:10.04,0:00:10.08,OP_CH,,0,0,0,fx,重复歌词")
+        stats = {}
+        cues, _ = parse_subtitles(path, diagnostics=stats)
+        self.assertEqual([(c.start, c.end) for c in cues], [(1, 1.12), (10, 10.08)])
+        self.assertEqual(stats["duplicates_removed"], 1)
+        self.assertEqual(stats["effects_merged"], 3)
+
+    def test_ass_unmarked_frame_runs_merge_without_collapsing_normal_dialogue(self):
+        path = self.ass(
+            "Dialogue: 0,0:00:00.00,0:00:00.04,Phone,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:00.04,0:00:00.08,Phone,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:00.08,0:00:00.12,Phone,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:01.00,0:00:02.00,Dial,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:02.00,0:00:03.00,Dial,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:03.00,0:00:03.00,Dial,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:03.00,0:00:03.04,Dial,,0,0,0,,妈妈",
+            "Dialogue: 0,0:00:03.04,0:00:03.08,Dial,,0,0,0,,妈妈")
+        cues, _ = parse_subtitles(path)
+        self.assertEqual([(c.start, c.end) for c in cues], [(0, .12), (1, 2), (2, 3), (3, 3), (3, 3.04), (3.04, 3.08)])
+
+    def test_ass_normal_base_layer_deduplicates_after_fx_compaction(self):
+        path = self.ass(
+            "Dialogue: 0,0:00:00.00,0:00:00.12,OP,,0,0,0,,歌词",
+            "Dialogue: 1,0:00:00.00,0:00:00.04,OP,,0,0,0,fx,歌词",
+            "Dialogue: 1,0:00:00.04,0:00:00.08,OP,,0,0,0,fx,歌词",
+            "Dialogue: 1,0:00:00.08,0:00:00.12,OP,,0,0,0,fx,歌词")
+        cues, _ = parse_subtitles(path)
+        self.assertEqual([(c.start, c.end) for c in cues], [(0, .12)])
+
+    def test_ass_merge_keeps_style_actor_and_line_boundaries(self):
+        path = self.ass(
+            "Dialogue: 0,0:00:01.00,0:00:01.04,Dial,A,0,0,0,fx,相同文本",
+            "Dialogue: 0,0:00:01.04,0:00:01.08,Dial,B,0,0,0,fx,相同文本",
+            "Dialogue: 0,0:00:01.08,0:00:01.12,Other,B,0,0,0,fx,相同文本",
+            r"Dialogue: 0,0:00:02.00,0:00:02.04,Dial,,0,0,0,fx,别走\N行かないで",
+            "Dialogue: 0,0:00:02.04,0:00:02.08,Dial,,0,0,0,fx,别走 行かないで")
+        cues, warnings = parse_subtitles(path)
+        self.assertEqual(len(cues), 5)
+        self.assertFalse(warnings)
+
+    def test_ass_short_frame_detection_uses_unclipped_duration(self):
+        path = self.ass(
+            "Dialogue: 0,0:00:00.00,0:00:01.04,Dial,,0,0,0,,重复",
+            "Dialogue: 0,0:00:00.01,0:00:01.06,Dial,,0,0,0,,重复",
+            "Dialogue: 0,0:00:00.02,0:00:01.08,Dial,,0,0,0,,重复")
+        cues, warnings = parse_subtitles(path, offset=-1)
+        self.assertEqual(len(cues), 3)
+        self.assertFalse(warnings)
+
+    def test_ass_large_render_file_is_compacted_before_unit_limit(self):
+        from mad_worker.dialogue import make_units
+        # Many display layers are not many subtitle sentences.
+        events = [f"Dialogue: {layer},0:00:01.00,0:00:03.00,OP_CH,,0,0,0,fx,重复歌词" for layer in range(20001)]
+        events.append("Dialogue: 0,0:21:22.47,0:21:25.71,Dial_CH,,0,0,0,,你不管什么事 都只想着自己啊")
+        cues, _ = parse_subtitles(self.ass(*events))
+        records, _ = make_units(cues)
+        self.assertEqual(len(records), 2)
+        self.assertEqual((cues[1].start, cues[1].end, cues[1].text), (1282.47, 1285.71, "你不管什么事 都只想着自己啊"))
+
+    def test_ass_only_drawing_and_comments_cannot_be_indexed(self):
+        path = self.ass(
+            r"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\p1}m 0 0 l 5 5",
+            "Comment: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,隐藏对白")
+        with self.assertRaisesRegex(UserError, "可见文本"):
+            parse_subtitles(path)
+
     def test_zero_duration_cues_keep_timestamp_and_use_half_open_windows(self):
         for suffix, content in (
             (".srt", "1\n00:00:00,000 --> 00:00:00,000\n开头\n\n2\n00:00:02,000 --> 00:00:02,000\n边界"),

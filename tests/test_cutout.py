@@ -17,6 +17,7 @@ from mad_worker.context import Context
 from mad_worker.errors import UserError
 from mad_worker.media import Media
 from mad_worker.timecode import resolve_range
+from mad_worker.images import CUTOUT_IMAGE_POLICY
 
 
 class CutoutInputTests(unittest.TestCase):
@@ -63,6 +64,7 @@ class CutoutInputTests(unittest.TestCase):
         with patch("mad_worker.ai.OpenAIClient") as client:
             client.return_value.vision_json.return_value = {"found": True, "bbox": [100, 200, 500, 900], "reason": "目标"}
             self.assertEqual(cutout.locate_target(Path("frame.png"), "人物", None, 200, 100, {}), [20., 20., 100., 90.])
+            client.assert_called_once_with({}, image_policy=CUTOUT_IMAGE_POLICY)
             client.return_value.vision_json.return_value = {"found": False, "bbox": [0, 0, 0, 0], "reason": "不存在"}
             with self.assertRaisesRegex(UserError, "未能"):
                 cutout.locate_target(Path("frame.png"), "人物", None, 200, 100, {})

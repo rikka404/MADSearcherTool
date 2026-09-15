@@ -1,6 +1,7 @@
 from pathlib import Path
 from .errors import UserError
 from .media import Media
+from .profiling import measure
 
 
 class Context:
@@ -16,7 +17,11 @@ class Context:
         if not isinstance(self.settings, dict):
             raise UserError("settings 必须是 JSON 对象。")
         self.media = Media(self.settings)
+        self.profiler = None
         self.emit = emit or (lambda event: None)
 
     def progress(self, value, message):
         self.emit({"type": "progress", "progress": max(0, min(1, float(value))), "message": str(message)})
+
+    def measure(self, name, **metadata):
+        return measure(self.profiler, name, **metadata)

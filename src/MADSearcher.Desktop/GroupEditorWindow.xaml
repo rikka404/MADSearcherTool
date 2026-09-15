@@ -1,0 +1,91 @@
+<Window x:Class="MADSearcher.Desktop.GroupEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MADSearcher.Desktop"
+        Title="编辑动画分组" Width="960" Height="790" MinWidth="800" MinHeight="620"
+        Style="{StaticResource {x:Type Window}}"
+        WindowStartupLocation="CenterOwner" Closing="WindowClosing">
+  <Window.Resources>
+    <local:ReferencePreviewConverter x:Key="ReferencePreview" />
+  </Window.Resources>
+  <Grid Margin="22">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Grid x:Name="Form">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+      <StackPanel Margin="0,0,0,16">
+        <TextBlock Text="作品资料" FontSize="19" FontWeight="SemiBold" />
+        <TextBlock Text="分组名称" Style="{StaticResource Label}" />
+        <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" MaxLength="120" />
+        <TextBlock Text="作品背景（可不填）" Style="{StaticResource Label}" />
+        <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True"
+                 TextWrapping="Wrap" Height="72" VerticalScrollBarVisibility="Auto" MaxLength="6000" />
+      </StackPanel>
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <TextBlock Text="角色列表 · 所有角色字段均可留空" TextWrapping="Wrap" Margin="0,0,0,10" />
+          <ListBox Grid.Row="1" x:Name="CharactersList" ItemsSource="{Binding Characters}"
+                   DisplayMemberPath="DisplayName" SelectionChanged="CharacterSelected"
+                   ScrollViewer.CanContentScroll="True" VirtualizingPanel.ScrollUnit="Pixel" />
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+            <Button Content="添加角色" Click="AddCharacter" />
+            <Button Content="移除" Click="RemoveCharacter" />
+          </StackPanel>
+        </Grid>
+        <Border Grid.Column="2" Style="{StaticResource Card}">
+          <Grid>
+            <TextBlock x:Name="EmptyHint" Text="添加或选择一个角色，填写已知资料。&#10;姓名、身份、外观及参考图都不是必填项。"
+                       Style="{StaticResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Center" />
+            <ScrollViewer x:Name="CharacterPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <TextBlock Text="角色身份" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="姓名（可不填）" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" MaxLength="120" />
+                <TextBlock Text="别名 / 日文名 / 昵称（每行一个，可不填）" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding AliasesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="64" VerticalScrollBarVisibility="Auto" MaxLength="2400" />
+                <TextBlock Text="身份说明（可不填）" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding Identity, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="65" VerticalScrollBarVisibility="Auto" MaxLength="1000" />
+                <TextBlock Text="角色的作品资料（经历、关系或设定，可不填）" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding WorkInfo, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="78" VerticalScrollBarVisibility="Auto" MaxLength="2000" />
+                <TextBlock Text="外观特点（发型、配饰、不同造型，可不填）" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding Appearance, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="85" VerticalScrollBarVisibility="Auto" MaxLength="2000" />
+                <TextBlock Text="参考图片（可不添加，每人最多3张）" Style="{StaticResource Label}" />
+                <ItemsControl ItemsSource="{Binding ReferenceImages}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,0,0,8">
+                        <Button Content="移除图片" Click="RemoveReference" Tag="{Binding}" DockPanel.Dock="Right" VerticalAlignment="Center" />
+                        <StackPanel>
+                          <Image Source="{Binding Converter={StaticResource ReferencePreview}}" Height="90" Width="130" Stretch="Uniform" HorizontalAlignment="Left" />
+                          <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" FontSize="10" ToolTip="{Binding}" />
+                        </StackPanel>
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="添加参考图…" Click="AddReference" HorizontalAlignment="Left" />
+                <TextBlock Text="保存时将参考图复制到工作区。启用AI画面索引后，角色资料和参考图参与每段分析；所有外发图片长边最多512像素。"
+                           Style="{StaticResource Muted}" FontSize="11" Margin="0,10,0,0" />
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+      </Grid>
+    </Grid>
+    <StackPanel Grid.Row="1" Margin="0,14,0,0">
+      <TextBlock Text="修改背景或角色资料后，请更新对应素材的视觉索引。每组最多30个角色。" Style="{StaticResource Muted}" FontSize="11" />
+      <TextBlock x:Name="ErrorLabel" Foreground="Salmon" TextWrapping="Wrap" Margin="0,5,0,8" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="CancelButton" Content="取消" IsCancel="True" MinWidth="90" />
+        <Button x:Name="SaveButton" Content="保存分组" Click="SaveGroup" Style="{StaticResource Primary}" MinWidth="120" />
+      </StackPanel>
+    </StackPanel>
+  </Grid>
+</Window>

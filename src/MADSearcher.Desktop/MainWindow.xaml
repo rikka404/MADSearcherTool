@@ -1,4 +1,5 @@
-<Window x:Class="MADSearcher.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="MADSearcher · 把时间留给创作" Width="1480" Height="940" MinWidth="1160" MinHeight="760" Style="{StaticResource {x:Type Window}}" WindowStartupLocation="CenterScreen" Loaded="WindowLoaded" Closing="WindowClosing">
+<Window x:Class="MADSearcher.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MADSearcher.Desktop" Title="MADSearcher · 把时间留给创作" Width="1480" Height="940" MinWidth="1160" MinHeight="760" Style="{StaticResource {x:Type Window}}" WindowStartupLocation="CenterScreen" Loaded="WindowLoaded" Closing="WindowClosing">
   <Grid Background="#101720">
     <Grid.RowDefinitions>
       <RowDefinition Height="36" />
@@ -16,6 +17,9 @@
             <MenuItem Header="退出" Click="ExitApp" />
           </MenuItem>
           <MenuItem Header="工具">
+            <MenuItem Header="打开索引目录" Click="OpenIndexDirectory" />
+            <MenuItem Header="删除缓存…" Click="CleanCache" IsEnabled="{Binding IsIdle}" />
+            <Separator />
             <MenuItem Header="环境诊断" Click="CheckEnvironment" IsEnabled="{Binding IsIdle}" />
             <MenuItem Header="设置" Click="ShowSettings" />
           </MenuItem>
@@ -69,10 +73,16 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
               <TextBox x:Name="QueryBox" ToolTip="输入人物、场景、动作、情节或台词" KeyDown="QueryKeyDown" FontSize="15" MinHeight="42" />
-              <CheckBox Grid.Column="1" x:Name="SemanticCheck" Content="语义检索" VerticalAlignment="Center" Margin="18,0,15,0" ToolTip="需要 OpenAI 密钥和已建立的视觉/语义索引" />
-              <Button Grid.Column="2" x:Name="SearchButton" Content="查找片段 →" Style="{StaticResource Primary}" Click="SearchClicked" IsEnabled="{Binding IsIdle}" Margin="0" />
+              <ComboBox Grid.Column="1" x:Name="SearchModeBox" SelectedIndex="0" SelectedValuePath="Tag" MinWidth="115" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="台词模式使用独立字幕索引，适合原文、不同译文和同义表达；画面情节沿用已有片段索引。">
+                <ComboBoxItem Content="综合" Tag="combined" />
+                <ComboBoxItem Content="台词" Tag="dialogue" />
+                <ComboBoxItem Content="画面情节" Tag="scene" />
+              </ComboBox>
+              <CheckBox Grid.Column="2" x:Name="SemanticCheck" Content="语义检索" VerticalAlignment="Center" Margin="18,0,15,0" ToolTip="查同义台词请勾选，并先补建字幕语义索引；需要密钥，查询向量可缓存。" />
+              <Button Grid.Column="3" x:Name="SearchButton" Content="查找片段 →" Style="{StaticResource Primary}" Click="SearchClicked" IsEnabled="{Binding IsIdle}" Margin="0" />
             </Grid>
           </Border>
           <Grid Grid.Row="2">
@@ -94,12 +104,28 @@
                     <Button Content="编辑" Click="EditGroup" IsEnabled="{Binding IsIdle}" />
                     <Button Content="删除" Click="DeleteGroup" IsEnabled="{Binding IsIdle}" />
                   </WrapPanel>
-                  <TextBlock Text="{Binding LibraryHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,11,0,10" />
+                  <TextBlock Text="{Binding LibraryHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,11,0,6" />
+                  <ScrollViewer x:Name="LibraryBackgroundScroll" MaxHeight="105" Margin="0,0,0,10"
+                                VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+                    <ScrollViewer.Style>
+                      <Style TargetType="ScrollViewer">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding LibraryBackground}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </ScrollViewer.Style>
+                    <TextBlock Text="{Binding LibraryBackground}" Style="{StaticResource Muted}" FontSize="11" />
+                  </ScrollViewer>
                   <WrapPanel>
                     <Button Content="＋ 导入 MP4" Click="ImportVideos" IsEnabled="{Binding IsIdle}" />
                     <Button Content="移除" Click="RemoveVideo" IsEnabled="{Binding IsIdle}" />
                   </WrapPanel>
-                  <ListBox x:Name="VideoList" ItemsSource="{Binding Videos}" SelectionChanged="VideoChanged" Height="155" Margin="0,10,0,0">
+                  <ListBox x:Name="VideoList" ItemsSource="{Binding Videos}" SelectionChanged="VideoChanged" Height="155" Margin="0,10,0,0"
+                           ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                           VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.IsVirtualizing="True"
+                           VirtualizingPanel.VirtualizationMode="Recycling">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
                         <StackPanel>
@@ -136,11 +162,60 @@
                     </StackPanel>
                   </Grid>
                   <CheckBox x:Name="AsrCheck" Content="无外挂字幕时运行本地语音识别" FontSize="11" />
+                  <TextBlock Text="分段方式" Style="{StaticResource Label}" />
+                  <ComboBox x:Name="SegmentationBox" SelectedIndex="0" SelectedValuePath="Tag">
+                    <ComboBoxItem Content="按镜头切换（推荐）" Tag="shot" />
+                    <ComboBoxItem Content="固定时长" Tag="fixed" />
+                  </ComboBox>
+                  <Grid Margin="0,6,0,8">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="10" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.Style>
+                      <Style TargetType="Grid">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding SelectedValue, ElementName=SegmentationBox}" Value="fixed">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Grid.Style>
+                    <StackPanel>
+                      <TextBlock Text="镜头灵敏度" Style="{StaticResource Label}" />
+                      <ComboBox x:Name="SceneSensitivityBox" SelectedIndex="1" SelectedValuePath="Tag">
+                        <ComboBoxItem Content="低（减少切分）" Tag="low" />
+                        <ComboBoxItem Content="中" Tag="medium" />
+                        <ComboBoxItem Content="高（捕捉更多）" Tag="high" />
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Text="长镜头上限（秒）" Style="{StaticResource Label}" />
+                      <TextBox x:Name="ShotMaxSecondsBox" Text="20" ToolTip="超过上限的镜头继续细分，仍保留所属镜头。2～60秒。" />
+                    </StackPanel>
+                  </Grid>
+                  <StackPanel>
+                    <StackPanel.Style>
+                      <Style TargetType="StackPanel">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding SelectedValue, ElementName=SegmentationBox}" Value="shot">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="固定时长（秒）" Style="{StaticResource Label}" />
+                    <TextBox x:Name="FixedSecondsBox" Text="8" ToolTip="2～60秒；每段仍按时长动态采样。" Margin="0,0,0,8" />
+                  </StackPanel>
                   <CheckBox x:Name="VisualCheck" Content="AI 分析画面与情节" FontSize="11" Margin="0,2,0,8" />
                   <CheckBox x:Name="SemanticIndexCheck" Content="建立字幕语义索引（OpenAI）" FontSize="11" Margin="0,2,0,8" />
-                  <TextBlock Text="视觉索引发送采样画面和字幕，并自动建立语义索引。单独建立语义索引只发送字幕；语义查询发送查询文字。" Style="{StaticResource Muted}" FontSize="10" />
+                  <TextBlock Text="视觉索引发送采样画面、字幕及已填角色资料与参考图，并建立语义索引。外发图片长边最多512像素。单独的字幕语义索引只发送字幕。" Style="{StaticResource Muted}" FontSize="10" />
+                  <TextBlock Text="{Binding IndexHint}" Style="{StaticResource Muted}" FontSize="10" Margin="0,8,0,0" />
                   <Button x:Name="IndexButton" Content="建立 / 更新选中素材索引" Style="{StaticResource Primary}" Click="IndexSelected" IsEnabled="{Binding IsIdle}" Margin="0,12,0,0" />
                   <Button Content="索引组内全部素材" Click="IndexAll" IsEnabled="{Binding IsIdle}" Margin="0,8,0,0" ToolTip="逐个处理每集素材；使用各自已有外挂字幕" />
+                  <Button Content="仅补建选中素材台词索引" Click="IndexDialogue" IsEnabled="{Binding IsIdle}" Margin="0,8,0,0" ToolTip="使用上方字幕与偏移；勾选建立字幕语义索引后计算单句/短上下文向量。复用已有向量，不重新分析画面或转录音频。" />
+                  <Button Content="打开索引耗时日志" Click="OpenIndexLogs" Margin="0,8,0,0" />
                 </StackPanel>
               </ScrollViewer>
             </Border>
@@ -165,8 +240,9 @@
                         </Border>
                         <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" Margin="0,10,0,0" />
                         <TextBlock Text="{Binding Timing}" Foreground="{StaticResource AccentBrush}" Margin="0,5,0,0" FontSize="12" />
-                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxHeight="78" Margin="0,7,0,5" FontSize="12" />
-                        <TextBlock Text="{Binding Evidence}" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+                        <TextBlock Text="{Binding Text}" ToolTip="{Binding DialogueEvidence}" TextWrapping="Wrap" MaxHeight="78" Margin="0,7,0,5" FontSize="12" />
+                        <TextBlock Text="{Binding Evidence}" ToolTip="{Binding RankingSummary}" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+                        <TextBlock Text="{Binding CharacterSummary}" ToolTip="{Binding CharacterEvidence}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                       </StackPanel>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
@@ -208,6 +284,10 @@
                     </StackPanel>
                   </Grid>
                   <TextBlock Text="结果用于定位；调整起止后重新生成预览。" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,11" />
+                  <WrapPanel Margin="0,0,0,9">
+                    <Button Content="扩展前后镜头" Click="ExpandShotContext" IsEnabled="{Binding SelectedItem.CanExpandContext, ElementName=ResultsList}" ToolTip="包括前后各一个镜头，仅调整预览范围，不改变检索依据。" />
+                    <Button Content="恢复命中范围" Click="RestoreHitRange" />
+                  </WrapPanel>
                   <Button Content="生成 / 更新预览" Click="MakePreview" IsEnabled="{Binding IsIdle}" Margin="0,0,0,9" />
                   <Button Content="导出 MP4 片段" Click="ExportClip" IsEnabled="{Binding IsIdle}" Margin="0,0,0,9" />
                   <Button Content="送到自动抠像 →" Style="{StaticResource Primary}" Click="SendToCutout" IsEnabled="{Binding IsIdle}" Margin="0,0,0,14" />
@@ -258,8 +338,8 @@
                       <TextBox x:Name="CutEndBox" TextChanged="CutSelectionChanged" Text="00:05:00" />
                     </StackPanel>
                   </Grid>
-                  <TextBlock Text="格式 01:23:05 = 1分23秒第5帧。帧从0起，也可输入小数秒，读取首帧时自动换算。非整数帧率按非丢帧时间码编号。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
-                  <Button Content="读取片段首帧" Click="ReadCutFrame" IsEnabled="{Binding IsIdle}" Margin="0,12,0,0" />
+                  <TextBlock Text="格式 01:23:05 = 1分23秒第5帧。帧从0起，也可输入小数秒，载入预览时自动换算。非整数帧率按非丢帧时间码编号。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
+                  <Button Content="载入预览 / 回到起点" Click="ReadCutFrame" IsEnabled="{Binding IsIdle}" Margin="0,12,0,0" />
                   <TextBlock Text="{Binding CutInfo}" Style="{StaticResource Muted}" Margin="0,9,0,0" FontSize="11" />
                   <TextBlock Text="02  指定要保留的主体" FontSize="16" FontWeight="SemiBold" Margin="0,25,0,12" />
                   <ComboBox x:Name="PromptModeBox" SelectedIndex="0" SelectionChanged="PromptModeChanged">
@@ -279,7 +359,7 @@
                   <StackPanel x:Name="BoxInputs" Visibility="Collapsed">
                     <TextBlock Text="原图像素：左、上、右、下" Style="{StaticResource Label}" />
                     <TextBox x:Name="BoxCoordinates" Text="0, 0, 100, 100" />
-                    <TextBlock Text="框住目标人物；坐标对应右侧首帧原始尺寸。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
+                    <TextBlock Text="框住目标人物；坐标对应原视频尺寸，预览缩放不改变坐标。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
                   </StackPanel>
                   <StackPanel x:Name="TextInputs" Visibility="Collapsed">
                     <TextBlock Text="人物外观 / 动作描述" Style="{StaticResource Label}" />
@@ -301,53 +381,46 @@
                   </DockPanel>
                   <TextBlock Text="始终输出：透明 PNG 序列 + 灰度蒙版序列" Style="{StaticResource Muted}" FontSize="11" Margin="0,10,0,0" />
                   <CheckBox x:Name="ExportMovCheck" Content="透明视频 · ProRes 4444 MOV" IsChecked="True" />
-                  <CheckBox x:Name="ExportAeCheck" Content="AE 逐帧路径蒙版脚本 · JSX" IsChecked="True" Margin="0,2,0,6" />
+                  <CheckBox x:Name="ExportAeCheck" Content="抠像完成时生成 AE 导入脚本" IsChecked="True" Margin="0,2,0,6" />
+                  <TextBlock Text="AE 导出方式（也用于已有结果补导出）" Style="{StaticResource Label}" />
+                  <ComboBox x:Name="AeModeBox" SelectedIndex="1" SelectedValuePath="Tag" Margin="0,0,0,8">
+                    <ComboBoxItem Content="透明 PNG 序列 · 保留像素" Tag="rgba" />
+                    <ComboBoxItem Content="原画＋独立 Alpha 遮罩 · 可局部修补" Tag="matte" />
+                    <ComboBoxItem Content="可编辑矢量路径 · 轮廓近似" Tag="paths" />
+                  </ComboBox>
+                  <TextBlock Text="前两种保留现有像素与透明度。遮罩方式包含补回／去除修补层；矢量复杂度超限时提供像素遮罩脚本。" Style="{StaticResource Muted}" FontSize="10" Margin="0,0,0,8" />
                   <TextBlock Text="PSD 序列暂不支持。复杂发丝、特效和遮挡需人工检查。" Style="{StaticResource Muted}" FontSize="10" />
                   <Button Content="开始抠像 →" Style="{StaticResource Primary}" Click="RunCutout" IsEnabled="{Binding IsIdle}" Margin="0,18,0,3" />
                   <TextBlock Text="建议先测试 2–10 秒；单次最多 120 秒 / 3600 帧。" Style="{StaticResource Muted}" FontSize="10" Margin="0,7,0,0" />
                 </StackPanel>
               </ScrollViewer>
             </Border>
-            <Grid Grid.Column="2">
-              <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="16" />
-                <RowDefinition Height="Auto" />
-              </Grid.RowDefinitions>
-              <Border Style="{StaticResource Card}">
-                <Grid>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                  </Grid.RowDefinitions>
-                  <DockPanel>
-                    <TextBlock Text="片段首帧 / 结果预览" FontSize="17" FontWeight="SemiBold" />
-                    <Button Content="显示首帧" Click="ShowCutStill" HorizontalAlignment="Right" Margin="0" />
-                  </DockPanel>
-                  <Border Grid.Row="1" Background="#090F16" CornerRadius="8" Margin="0,15,0,15">
-                    <Grid>
-                      <TextBlock Text="从清晰的第一帧开始" Foreground="#57717E" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      <Image x:Name="CutFirstFrame" Stretch="Uniform" />
-                      <MediaElement x:Name="CutPlayer" LoadedBehavior="Manual" UnloadedBehavior="Close" MediaFailed="PlayerFailed" Visibility="Collapsed" />
-                    </Grid>
-                  </Border>
-                  <TextBlock Grid.Row="2" x:Name="CutFrameLabel" Text="尚未读取首帧。模型将从这一帧识别并持续追踪主体。" Style="{StaticResource Muted}" FontSize="11" />
-                </Grid>
-              </Border>
-              <Border Grid.Row="2" Style="{StaticResource Card}">
-                <StackPanel>
-                  <TextBlock Text="交付到你的创作流程" FontSize="17" FontWeight="SemiBold" />
-                  <TextBlock x:Name="CutResultLabel" Text="完成后可检查透明轮廓，或将逐帧路径交给 After Effects。" Style="{StaticResource Muted}" Margin="0,9,0,14" MaxHeight="145" />
-                  <WrapPanel>
-                    <Button Content="▶ 预览结果" Click="PlayCutResult" />
-                    <Button Content="Ⅱ 暂停" Click="PauseCutResult" />
-                    <Button Content="打开输出" Click="OpenCutResult" />
-                    <Button Content="发送到 AE" Style="{StaticResource Primary}" Click="SendToAe" IsEnabled="{Binding IsIdle}" />
-                  </WrapPanel>
-                </StackPanel>
-              </Border>
-            </Grid>
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
+              <StackPanel>
+                <Border Style="{StaticResource Card}">
+                  <Expander x:Name="SourceExpander" IsExpanded="True" Header="原视频 · 选择抠像工作区" Foreground="{StaticResource TextBrush}" FontSize="16">
+                    <StackPanel>
+                      <local:BufferedPreview x:Name="SourcePreview" />
+                      <TextBlock x:Name="CutFrameLabel" Text="选择视频后载入预览，首次定位允许等待。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" />
+                    </StackPanel>
+                  </Expander>
+                </Border>
+                <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                  <Expander x:Name="ResultExpander" IsExpanded="True" Header="抠像结果 · 透明画面" Foreground="{StaticResource TextBrush}" FontSize="16">
+                    <StackPanel>
+                      <local:BufferedPreview x:Name="ResultPreview" />
+                      <TextBlock x:Name="CutResultLabel" Text="完成抠像后，在这里播放和逐帧检查轮廓。" Style="{StaticResource Muted}" Margin="0,8,0,12" TextWrapping="Wrap" />
+                      <WrapPanel>
+                        <Button Content="打开输出" Click="OpenCutResult" />
+                        <Button Content="从已有结果补导出 AE…" Click="ReexportAe" IsEnabled="{Binding IsIdle}" ToolTip="选择已有抠像目录中的manifest.json，按左侧AE方式重新生成脚本，无需重跑SAM。" />
+                        <Button Content="发送到 AE" Style="{StaticResource Primary}" Click="SendToAe" IsEnabled="{Binding IsIdle}" />
+                      </WrapPanel>
+                      <TextBlock x:Name="AeExportLabel" Text="AE脚本准备完成后，可点击发送。补导出也支持之前的抠像任务。" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Expander>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
           </Grid>
         </Grid>
         <Grid x:Name="SettingsPage" Visibility="Collapsed">

@@ -34,6 +34,7 @@ public partial class MainWindow : Window
         _worker = new WorkerClient(_root);
         var savedKey = _state.Settings.ApiKey;
         InitializeComponent();
+        InitializeCutPreview();
         DataContext = _state;
         ApiKeyBox.Password = savedKey ?? "";
         CutOutputBox.Text = Path.Combine(_state.Settings.Workspace, "exports", "cutout");
@@ -74,7 +75,7 @@ public partial class MainWindow : Window
         _cancellation?.Cancel();
         _playbackTimer.Stop();
         PreviewPlayer.Close();
-        CutPlayer.Close();
+        CloseCutPreview();
         _state.Settings.ApiKey = "";
     }
 
@@ -184,7 +185,8 @@ public partial class MainWindow : Window
     private void Navigate(string page)
     {
         PreviewPlayer.Pause();
-        CutPlayer.Pause();
+        SourcePreview.Suspend();
+        ResultPreview.Suspend();
         SearchPage.Visibility = page == "search" ? Visibility.Visible : Visibility.Collapsed;
         CutoutPage.Visibility = page == "cutout" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;

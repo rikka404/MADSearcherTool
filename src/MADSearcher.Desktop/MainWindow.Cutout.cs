@@ -3,18 +3,21 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 
 namespace MADSearcher.Desktop;
 
 /// <summary>Cutout inputs and result handoff. Segmentation and export remain worker operations.</summary>
 public partial class MainWindow
 {
-    private string _cutPreviewFile = "";
     private string _cutResultDirectory = "";
     private string _aeScript = "";
-    private string _cutFrameSource = "";
-    private long _cutFrameIndex = -1;
+    private string _aeExportMode = "";
     private long _cutSelectionVersion;
+    private bool _syncingCutRange;
+    private readonly DispatcherTimer _cutRangeDelay = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private CancellationTokenSource? _cutRangeCancellation;
+    private string _cutSourceIdentity = "";
     private sealed record CutSelection(string Path, string StartText, string EndText, long Version);
     private sealed record ResolvedCutSelection(CutSelection Input, CutRangeInfo Range);
 
@@ -36,10 +39,12 @@ public partial class MainWindow
             ?? throw new InvalidOperationException("未能读取抠像帧范围。");
         if (selection.Version == _cutSelectionVersion)
         {
-            CutStartBox.Text = range.StartTimecode;
-            CutEndBox.Text = range.EndTimecode;
+            _syncingCutRange = true;
+            try { CutStartBox.Text = range.StartTimecode; CutEndBox.Text = range.EndTimecode; }
+            finally { _syncingCutRange = false; }
             // Normalizing our own inputs can raise TextChanged; retain that new version.
             selection = selection with { StartText = range.StartTimecode, EndText = range.EndTimecode, Version = _cutSelectionVersion };
+            if (SourcePreview.Media?.Path == selection.Path) SourcePreview.SetSelection(range.StartFrame, range.EndFrame);
         }
         return new(selection, range);
     }
@@ -47,16 +52,32 @@ public partial class MainWindow
     private void CutSelectionChanged(object sender, TextChangedEventArgs e)
     {
         _cutSelectionVersion++;
-        _cutFrameSource = "";
-        _cutFrameIndex = -1;
-        if (CutFirstFrame == null || CutFrameLabel == null)
+        if (SourcePreview == null || CutFrameLabel == null)
             return;
-        CutFirstFrame.Source = null;
-        CutFrameLabel.Text = "片段已改变，请读取新的首帧。";
+        _cutRangeCancellation?.Cancel();
+        if (ReferenceEquals(sender, CutPathBox))
+        {
+            SourcePreview.Clear();
+            _cutSourceIdentity = "";
+        }
+        CutFrameLabel.Text = "起止范围已改变；使用首帧蒙版时，请确认蒙版仍对应新的起点。";
         _state.CutInfo = "片段已改变；已有任务继续使用启动时的片段。";
+        if (!_syncingCutRange && SourcePreview.Media != null)
+        {
+            SourcePreview.SetSelectionError("正在更新抠像范围…");
+            _cutRangeDelay.Stop(); _cutRangeDelay.Start();
+        }
     }
 
     private string PromptMode => (PromptModeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "mask";
+    private string AeMode => AeModeBox.SelectedValue?.ToString() ?? "matte";
+    private static string AeModeName(string mode) => mode switch
+    {
+        "rgba" => "透明PNG序列",
+        "matte" => "原画＋独立Alpha遮罩（可局部修补）",
+        "paths" => "可编辑矢量路径（轮廓近似）",
+        _ => "未生成"
+    };
 
     private async void ChooseCutVideo(object sender, RoutedEventArgs e)
     {
@@ -79,35 +100,36 @@ public partial class MainWindow
             await LoadCutFrame(token);
         });
     }
-    private async void ReadCutFrame(object sender, RoutedEventArgs e) => await Execute("正在读取片段首帧…", LoadCutFrame);
+    private async void ReadCutFrame(object sender, RoutedEventArgs e) => await Execute("正在载入预览信息…", LoadCutFrame);
     private async Task LoadCutFrame(CancellationToken token)
     {
         var selection = await ResolveCutSelection(ReadCutSelection(), token);
         await LoadResolvedCutFrame(selection, token);
     }
 
-    private async Task LoadResolvedCutFrame(ResolvedCutSelection selection, CancellationToken token)
+    private Task LoadResolvedCutFrame(ResolvedCutSelection selection, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         if (selection.Input.Version != _cutSelectionVersion)
-            return;
+            return Task.CompletedTask;
         var range = selection.Range;
         var video = range.Video;
-        var data = await Call("video.frame", new
+        var file = new FileInfo(selection.Input.Path);
+        var identity = $"{file.FullName}|{file.Length}|{file.LastWriteTimeUtc.Ticks}|{OperationSettings.FfmpegPath}";
+        SourceExpander.IsExpanded = true;
+        if (_cutSourceIdentity != identity || SourcePreview.Media == null)
         {
-            path = selection.Input.Path,
-            frame_index = range.StartFrame
-        }, token);
-        // The user can edit the next selection while this frame is being decoded.
-        if (selection.Input.Version != _cutSelectionVersion)
-            return;
-        CutPlayer.Stop();
-        CutPlayer.Visibility = Visibility.Collapsed;
-        CutFirstFrame.Source = Images.Load(Text(data, "path"));
-        _cutFrameSource = selection.Input.Path;
-        _cutFrameIndex = range.StartFrame;
+            SourcePreview.Configure(new PreviewMedia(file.FullName, video.Width, video.Height, video.Fps,
+                range.NominalFps, range.TotalFrames, EstimatedCount: range.TotalFramesEstimated), OperationSettings.FfmpegPath,
+                range.StartFrame, canMark: true);
+            _cutSourceIdentity = identity;
+        }
+        else SourcePreview.Seek(range.StartFrame);
+        SourcePreview.SetSelection(range.StartFrame, range.EndFrame);
         _state.CutInfo = $"{video.Width} × {video.Height} · {video.Fps:0.###} fps · 时间码按 {range.NominalFps} 帧编号（0–{range.NominalFps - 1}）\n"
             + $"已选 {range.FrameCount} 帧 · 全片{(range.TotalFramesEstimated ? "估计" : "共")} {range.TotalFrames} 帧";
-        CutFrameLabel.Text = $"当前首帧：{range.StartTimecode} · 第 {range.StartFrame} 帧（从0起） · 原图 {video.Width} × {video.Height} 像素";
+        CutFrameLabel.Text = $"抠像首帧：{range.StartTimecode} · 源第{range.StartFrame}帧 · 原图{video.Width}×{video.Height}；预览缩放不改变蒙版坐标。";
+        return Task.CompletedTask;
     }
     private void PromptModeChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -138,6 +160,7 @@ public partial class MainWindow
         var prompt = PromptTextBox.Text.Trim();
         var exportVideo = ExportMovCheck.IsChecked == true;
         var exportAe = ExportAeCheck.IsChecked == true;
+        var aeMode = AeMode;
         var mask = "";
         var reference = "";
         double[]? box = null;
@@ -161,8 +184,7 @@ public partial class MainWindow
         var video = range.Video;
         if (box != null && (box[0] < 0 || box[1] < 0 || box[2] <= box[0] || box[3] <= box[1] || box[2] > video.Width || box[3] > video.Height))
             throw new InvalidOperationException("像素框必须位于原图范围内，右坐标大于左坐标，下坐标大于上坐标。");
-        if (selection.Path != _cutFrameSource || range.StartFrame != _cutFrameIndex)
-            await LoadResolvedCutFrame(resolved, token);
+        // Browsing never changes this captured range, and preview readiness is not a processing prerequisite.
         var data = await Call("cutout.run", new
         {
             path = selection.Path,
@@ -175,32 +197,110 @@ public partial class MainWindow
             box,
             output_dir = output,
             export_video = exportVideo,
-            export_ae = exportAe
+            export_ae = exportAe,
+            ae_mode = aeMode
         }, token);
         _cutResultDirectory = Text(data, "output_dir");
-        _cutPreviewFile = Text(data, "preview_path");
-        _aeScript = Text(data, "ae_script");
+        SetAeExport(data);
+        ResultPreview.Configure(new PreviewMedia(Path.Combine(Text(data, "rgba_dir"), "%06d.png"),
+            video.Width, video.Height, video.Fps, range.NominalFps, data.GetProperty("frame_count").GetInt64(),
+            range.StartFrame, ImageSequence: true), OperationSettings.FfmpegPath);
+        ResultExpander.IsExpanded = true;
         CutResultLabel.Text = $"{Path.GetFileName(selection.Path)} · {range.StartTimecode}—{range.EndTimecode}（终点不含）\n已输出 {data.GetProperty("frame_count")} 帧\n{_cutResultDirectory}\n{Warnings(data)}";
         _state.Status = "抠像完成。请预览轮廓，特别检查遮挡、发丝与切镜位置。";
     });
-    private void ShowCutStill(object sender, RoutedEventArgs e)
+    private void InitializeCutPreview()
     {
-        CutPlayer.Stop();
-        CutPlayer.Visibility = Visibility.Collapsed;
+        SourcePreview.Activated += _ => ResultPreview.Suspend();
+        ResultPreview.Activated += _ => SourcePreview.Suspend();
+        SourcePreview.StartRequested += frame => SetCutBoundary(frame, true);
+        SourcePreview.EndRequested += frame => SetCutBoundary(frame, false);
+        _cutRangeDelay.Tick += async (_, _) => { _cutRangeDelay.Stop(); await RefreshCutRange(); };
     }
-    private void PlayCutResult(object sender, RoutedEventArgs e)
+
+    private void SetCutBoundary(long frame, bool start)
     {
-        if (!File.Exists(_cutPreviewFile))
+        var media = SourcePreview.Media;
+        if (media == null) return;
+        if (start) CutStartBox.Text = media.Timecode(frame);
+        else CutEndBox.Text = media.Timecode(frame);
+        CutFrameLabel.Text = start ? "起点已更新；首帧蒙版必须对应新起点。" : "结束点已更新，包含刚才显示的画面。";
+        // End marker may equal start while the user is adjusting both; never silently move the other marker.
+        _cutRangeDelay.Stop(); _cutRangeDelay.Start();
+    }
+
+    private async Task RefreshCutRange()
+    {
+        if (SourcePreview.Media == null || _storageMaintenance) return;
+        _cutRangeCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource();
+        _cutRangeCancellation = cancellation;
+        var version = _cutSelectionVersion;
+        try
         {
-            _state.Status = "还没有完成的抠像预览。请先运行抠像。";
-            return;
+            var selection = ReadCutSelection();
+            var data = await _worker.RunAsync("cutout.range", new { path = selection.Path, start = selection.StartText, end = selection.EndText },
+                _state.Settings.Snapshot(), new Progress<(double, string)>(_ => { }), cancellation.Token);
+            if (version != _cutSelectionVersion || cancellation.IsCancellationRequested) return;
+            var range = JsonSerializer.Deserialize<CutRangeInfo>(data.GetRawText()) ?? throw new InvalidOperationException("无法解析帧范围。");
+            SourcePreview.SetSelection(range.StartFrame, range.EndFrame);
+            _state.CutInfo = $"已选 {range.FrameCount} 帧 · {range.StartTimecode} → {range.EndTimecode}（终点不含）";
         }
-        CutPlayer.Visibility = Visibility.Visible;
-        CutPlayer.Source = new Uri(_cutPreviewFile);
-        CutPlayer.Play();
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (version == _cutSelectionVersion) SourcePreview.SetSelectionError(SafeError(ex.Message));
+        }
+        finally { if (ReferenceEquals(_cutRangeCancellation, cancellation)) _cutRangeCancellation = null; }
     }
-    private void PauseCutResult(object sender, RoutedEventArgs e) => CutPlayer.Pause();
+
+    private void CloseCutPreview()
+    {
+        _cutRangeDelay.Stop(); _cutRangeCancellation?.Cancel();
+        SourcePreview.Dispose(); ResultPreview.Dispose();
+    }
     private void OpenCutResult(object sender, RoutedEventArgs e) => OpenPath(_cutResultDirectory);
+    private void SetAeExport(JsonElement data)
+    {
+        _aeScript = Text(data, "ae_script");
+        _aeExportMode = Text(data, "ae_actual_mode");
+        AeExportLabel.Text = string.IsNullOrWhiteSpace(_aeScript)
+            ? "本次没有可发送的AE脚本；可选择已有结果补导出。"
+            : $"已准备：{AeModeName(_aeExportMode)}\n来源：{Path.GetFileName(_cutResultDirectory)}\n{_aeScript}";
+        if (!string.IsNullOrWhiteSpace(_aeScript) && Text(data, "ae_mode") != _aeExportMode)
+            AeExportLabel.Text += "\n矢量路径未完成，发送按钮将使用保留像素的Alpha遮罩版本。";
+        if (data.TryGetProperty("ae_report_path", out var report) && !string.IsNullOrWhiteSpace(report.GetString()))
+            AeExportLabel.Text += $"\n导出报告：{report.GetString()}";
+    }
+    private async void ReexportAe(object sender, RoutedEventArgs e)
+    {
+        if (_state.Busy) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择已有抠像任务的manifest.json",
+            Filter = "抠像任务记录|manifest.json|JSON文件|*.json",
+            FileName = "manifest.json"
+        };
+        if (Directory.Exists(_cutResultDirectory)) dialog.InitialDirectory = _cutResultDirectory;
+        else if (Directory.Exists(CutOutputBox.Text)) dialog.InitialDirectory = CutOutputBox.Text;
+        if (dialog.ShowDialog(this) != true) return;
+        var manifest = dialog.FileName;
+        var mode = AeMode;
+        await Execute("正在从已有抠像结果补导出AE…", async token =>
+        {
+            var data = await Call("cutout.export_ae", new { manifest_path = manifest, ae_mode = mode }, token);
+            _cutResultDirectory = Text(data, "output_dir");
+            SetAeExport(data);
+            var fps = data.GetProperty("fps").GetDouble();
+            ResultPreview.Configure(new PreviewMedia(Path.Combine(Text(data, "rgba_dir"), "%06d.png"),
+                data.GetProperty("width").GetInt32(), data.GetProperty("height").GetInt32(), fps, (int)Math.Ceiling(fps),
+                data.GetProperty("frame_count").GetInt64(), data.GetProperty("start_frame").GetInt64(), ImageSequence: true),
+                OperationSettings.FfmpegPath);
+            ResultExpander.IsExpanded = true;
+            CutResultLabel.Text = $"已有抠像任务：{Path.GetFileName(_cutResultDirectory)}\n{data.GetProperty("frame_count").GetInt32()}帧 · AE补导出完成\n{_cutResultDirectory}\n{Warnings(data)}";
+            _state.Status = $"AE脚本已准备：{AeModeName(_aeExportMode)}。原始抠像及旧脚本均保留。{Warnings(data)}";
+        });
+    }
     private void SendToAe(object sender, RoutedEventArgs e)
     {
         if (_state.Busy)
@@ -213,7 +313,7 @@ public partial class MainWindow
             start.ArgumentList.Add("-r");
             start.ArgumentList.Add(script);
             Process.Start(start);
-            _state.Status = "已发送 JSX 到 After Effects。请在 AE 中检查新建合成与逐帧蒙版。";
+            _state.Status = $"已派发AE脚本：{AeModeName(_aeExportMode)}。请在AE检查导入结果；派发成功不代表执行完成。";
         }
         catch (Exception ex)
         {

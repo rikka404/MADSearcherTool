@@ -1,5 +1,4 @@
 """Pixel outputs are authoritative; AE paths are bounded, discrete approximations."""
-import json
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +8,7 @@ from .errors import UserError
 
 
 MAX_CONTOURS_PER_FRAME = 64
-MAX_VERTICES_PER_CONTOUR = 256
+MAX_VERTICES_PER_CONTOUR = 4096
 MAX_AE_VERTICES = 1_000_000
 
 
@@ -59,7 +58,7 @@ def export_preview(media, rgba_dir, width, height, fps, frame_count, output):
     return str(output)
 
 
-def mask_contours(alpha):
+def mask_contours(alpha, *, diagnostics=None):
     """Retain the contour tree, including holes and islands inside holes.
 
     Paths follow pixel centres with <= 0.75 px simplification. Subpixel alpha is
@@ -73,8 +72,10 @@ def mask_contours(alpha):
     if binary.ndim != 2:
         raise UserError("AE 路径需要二维灰度蒙版。")
     contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    stats = diagnostics if diagnostics is not None else {}
+    stats.update(contours=len(contours), max_vertices=0)
     if len(contours) > MAX_CONTOURS_PER_FRAME:
-        raise UserError(f"某帧包含 {len(contours)} 条轮廓，超过 AE 路径上限 {MAX_CONTOURS_PER_FRAME}；请使用透明 PNG/MOV。", "export_limit")
+        raise UserError(f"包含{len(contours)}条轮廓，超过本工具矢量导出保护上限{MAX_CONTOURS_PER_FRAME}；可使用像素Alpha遮罩。", "export_limit")
     if hierarchy is None:
         return []
     result = []
@@ -91,8 +92,9 @@ def mask_contours(alpha):
                         [float(x + w), float(y + h)], [float(x), float(y + h)]]
         else:
             vertices = (polygon.astype(np.float64) + 0.5).tolist()
+        stats.update(contour_index=index, vertices=len(vertices), max_vertices=max(stats["max_vertices"], len(vertices)))
         if len(vertices) > MAX_VERTICES_PER_CONTOUR:
-            raise UserError(f"某条轮廓需要 {len(vertices)} 个顶点，超过 AE 路径上限 {MAX_VERTICES_PER_CONTOUR}；请使用透明 PNG/MOV。", "export_limit")
+            raise UserError(f"第{index + 1}条轮廓需要{len(vertices)}个顶点，超过本工具矢量导出保护上限{MAX_VERTICES_PER_CONTOUR}；可使用像素Alpha遮罩。", "export_limit")
         result.append({"depth": depth, "vertices": vertices})
     # Fixed slots per depth maintain ADD/SUBTRACT ordering across every frame.
     result.sort(key=lambda entry: (entry["depth"], -polygon_area(entry["vertices"])))
@@ -105,13 +107,24 @@ def polygon_area(vertices):
                    for i in range(len(vertices))) / 2)
 
 
-def build_ae_payload(source_dir, mask_paths, fps, width, height):
+def build_ae_payload(source_dir, mask_paths, fps, width, height, *, diagnostics=None):
     frames, counts, total_vertices = [], [1], 0  # one ADD slot even for an entirely empty clip
-    for mask_path in mask_paths:
-        with Image.open(mask_path) as image:
-            if image.size != (width, height):
-                raise UserError("AE 输出序列含有尺寸不一致的蒙版。", "export")
-            contours = mask_contours(np.asarray(image.convert("L")))
+    stats = diagnostics if diagnostics is not None else {}
+    stats.update(frames_processed=0, total_vertices=0, max_vertices_per_contour=0, max_contours_per_frame=0,
+                 limits={"contours_per_frame": MAX_CONTOURS_PER_FRAME, "vertices_per_contour": MAX_VERTICES_PER_CONTOUR,
+                         "total_vertices": MAX_AE_VERTICES}, simplification_pixels=0.75)
+    for frame_index, mask_path in enumerate(mask_paths):
+        frame_stats = {"frame_index": frame_index, "time_seconds": round(frame_index / fps, 6)}
+        try:
+            with Image.open(mask_path) as image:
+                if image.size != (width, height):
+                    raise UserError("AE输出序列含有尺寸不一致的蒙版。", "export")
+                contours = mask_contours(np.asarray(image.convert("L")), diagnostics=frame_stats)
+        except UserError as exc:
+            stats["failure"] = frame_stats
+            raise UserError(f"第{frame_index + 1}帧（片段内{frame_index / fps:.3f}秒）：{exc}", exc.code) from exc
+        stats["max_vertices_per_contour"] = max(stats["max_vertices_per_contour"], frame_stats["max_vertices"])
+        stats["max_contours_per_frame"] = max(stats["max_contours_per_frame"], frame_stats["contours"])
         grouped = []
         for contour in contours:
             depth = contour["depth"]
@@ -120,93 +133,30 @@ def build_ae_payload(source_dir, mask_paths, fps, width, height):
             grouped[depth].append(contour["vertices"])
             total_vertices += len(contour["vertices"])
         if total_vertices > MAX_AE_VERTICES:
-            raise UserError("AE 路径数据超过 100 万顶点，请缩短片段或使用透明 PNG/MOV。", "export_limit")
+            stats["failure"] = frame_stats | {"total_vertices": total_vertices}
+            raise UserError(f"第{frame_index + 1}帧时累计{total_vertices}个顶点，超过本工具100万顶点保护上限；可使用像素Alpha遮罩。", "export_limit")
         while len(counts) < len(grouped):
             counts.append(0)
         for depth, paths in enumerate(grouped):
             counts[depth] = max(counts[depth], len(paths))
         frames.append(grouped)
+        stats.update(frames_processed=len(frames), total_vertices=total_vertices)
     if not frames:
         raise UserError("没有可输出的蒙版帧。")
     if sum(counts) > MAX_CONTOURS_PER_FRAME:
-        raise UserError("跨帧嵌套轮廓需要超过 64 条 AE 路径，请使用透明 PNG/MOV。", "export_limit")
+        stats["failure"] = {"required_slots": sum(counts)}
+        raise UserError("跨帧嵌套轮廓超过本工具64个矢量路径槽保护上限；可使用像素Alpha遮罩。", "export_limit")
+    stats["required_slots"] = sum(counts)
     return {"source": str((Path(source_dir) / "000000.png").resolve()).replace("\\", "/"),
             "fps": fps, "width": width, "height": height, "count": len(frames),
             "slots": counts, "frames": frames}
 
 
 def export_ae(source_dir, mask_paths, fps, width, height, output):
+    """Legacy vector-only helper; application exports use ae_export.export_bundle."""
     if not 1 <= fps <= 99:
-        raise UserError("该视频帧率超出 AE 脚本支持的 1–99 fps，请使用 PNG/MOV 或先转码到常用帧率。", "export_limit")
+        raise UserError("该视频帧率超出AE脚本支持的1–99 fps。", "export_limit")
+    from .ae_export import write_script
     data = build_ae_payload(source_dir, mask_paths, fps, width, height)
-    # Embed owned JSON as an ordinary ES3 literal: no eval, external parser, or
-    # executable user input. Hold keyframes support changing vertex topology.
-    serialized = json.dumps(data, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
-    script = """#target aftereffects
-// Generated by MADSearcher. PNG alpha is authoritative; paths are approximations.
-// Run via File > Scripts > Run Script File, or AfterFX.exe -r this_file.jsx.
-(function () {
-    var data = __PAYLOAD__;
-    var source = new File(data.source);
-    if (!source.exists) { alert("Missing source_frames sequence. Keep this script with its export folder."); return; }
-    app.beginUndoGroup("MADSearcher cutout paths");
-    try {
-        if (!app.project) app.newProject();
-        var comp = app.project.activeItem;
-        var duration = data.count / data.fps;
-        if (!(comp instanceof CompItem)) {
-            comp = app.project.items.addComp("MADSearcher cutout", data.width, data.height, 1, Math.max(duration, 1 / data.fps), data.fps);
-        }
-        var base = Math.max(0, comp.time);
-        if (comp.duration < base + duration) comp.duration = base + duration;
-        var options = new ImportOptions(source);
-        options.sequence = true;
-        options.forceAlphabetical = true;
-        var footage = app.project.importFile(options);
-        footage.name = "MADSearcher source sequence";
-        if (!footage.mainSource.isStill) footage.mainSource.conformFrameRate = data.fps;
-        var layer = comp.layers.add(footage);
-        layer.name = "MADSearcher cutout (editable paths)";
-        layer.startTime = base;
-        layer.inPoint = base;
-        layer.outPoint = base + duration;
-        layer.motionBlur = false;
-        layer.frameBlendingType = FrameBlendingType.NO_FRAME_BLEND;
-        var times = [];
-        for (var f = 0; f < data.count; f++) times.push(base + f / data.fps);
-        for (var depth = 0; depth < data.slots.length; depth++) {
-            for (var slot = 0; slot < data.slots[depth]; slot++) {
-                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
-                mask.name = "MAD d" + depth + " p" + slot;
-                mask.maskMode = depth % 2 ? MaskMode.SUBTRACT : MaskMode.ADD;
-                mask.rotoBezier = false;
-                var shapes = [];
-                for (var frame = 0; frame < data.count; frame++) {
-                    var group = data.frames[frame][depth];
-                    var points = group && group[slot] ? group[slot] : [[-4,-4],[-3,-4],[-3,-3]];
-                    var shape = new Shape();
-                    shape.vertices = points;
-                    shape.closed = true;
-                    var tangents = [];
-                    for (var p = 0; p < points.length; p++) tangents.push([0,0]);
-                    shape.inTangents = tangents;
-                    shape.outTangents = tangents;
-                    shapes.push(shape);
-                }
-                var path = mask.property("ADBE Mask Shape");
-                path.setValuesAtTimes(times, shapes);
-                for (var key = 1; key <= path.numKeys; key++) {
-                    path.setInterpolationTypeAtKey(key, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);
-                }
-            }
-        }
-        comp.openInViewer();
-    } catch (error) {
-        alert("MADSearcher: " + error.toString() + "\\nUndo once to remove any partial import.");
-    } finally {
-        app.endUndoGroup();
-    }
-})();
-""".replace("__PAYLOAD__", serialized)
-    Path(output).write_text(script, encoding="utf-8")
-    return str(output)
+    data.update(mode="paths", name="cutout")
+    return write_script(data, output)

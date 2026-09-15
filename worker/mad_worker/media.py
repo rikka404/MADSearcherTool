@@ -14,6 +14,10 @@ class Media:
     def __init__(self, settings=None):
         self.settings = settings or {}
 
+    def iter_index_frames(self, path, max_edge):
+        from .frame_stream import iter_frames
+        return iter_frames(self.executable("ffmpeg"), path, max_edge)
+
     def executable(self, name):
         configured = str(self.settings.get(name + "_path") or name).strip()
         resolved = shutil.which(configured)
@@ -83,14 +87,19 @@ class Media:
             raise UserError("没有解码到指定帧，请检查帧号是否超出实际视频范围。", "media")
         return str(output)
 
-    def extract_frame(self, path, seconds, output):
+    def extract_frame(self, path, seconds, output, *, max_edge=None):
         source = existing_file(path, "视频")
         seconds = finite_number(seconds, "取帧时间", 0)
         output = Path(output).resolve()
         if output == source:
             raise UserError("输出不能覆盖原视频。")
         output.parent.mkdir(parents=True, exist_ok=True)
-        self.run(["-y", "-ss", f"{seconds:.6f}", "-i", source, "-map", "0:v:0", "-frames:v", "1", "-update", "1", output])
+        filters = []
+        if max_edge is not None:
+            edge = int(finite_number(max_edge, "采样图片长边", 16, 4096))
+            filters = ["-vf", f"scale=w='min({edge},iw)':h='min({edge},ih)':force_original_aspect_ratio=decrease"]
+        self.run(["-y", "-ss", f"{seconds:.6f}", "-i", source, "-map", "0:v:0", *filters,
+                  "-frames:v", "1", "-update", "1", output])
         if not output.is_file() or output.stat().st_size == 0:
             raise UserError("该时间点未能读取画面，请将时间向前调整一帧。", "media")
         return str(output)

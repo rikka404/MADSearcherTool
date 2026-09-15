@@ -328,7 +328,506 @@
       },
       "updated_at": "2026-09-12T04:17:19.305391+00:00",
       "evidence": "反馈5/6已实现并完成静态核对和发布，4/7/8待定未实现；保留本地dev改动，未提交/推送，acceptance继续延期。"
+    },
+    {
+      "id": "character_index",
+      "title": "角色资料、512像素外发图和索引耗时日志",
+      "depends_on": [
+        "frame_and_scroll"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "角色数据、图片策略、关联检索和日志合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:05:08.781232+00:00",
+            "evidence": "设计文档第9节；v0.1.0已推送并固定35edf25，角色字段全部选填、512图像边界、结构化关联与阶段日志合同明确。"
+          },
+          {
+            "id": "data",
+            "title": "角色资料存储、参考图管理及增量迁移",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:07:12.048352+00:00",
+            "evidence": "新增角色及片段关联表，旧库backup后版本化增量迁移；字段选填、托管参考图、角色ID归属和事务更新已实现；仅语法编译。"
+          },
+          {
+            "id": "ai",
+            "title": "统一512像素预处理与结构化角色提示词",
+            "depends_on": [
+              "data"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:14:00.365189+00:00",
+            "evidence": "所有视觉输入统一512像素JPEG副本和有限LRU缓存；角色资料/参考图固定前缀、结构化ID关联及二次验证已实现；Python语法编译通过。"
+          },
+          {
+            "id": "index",
+            "title": "角色关联索引/查询及阶段耗时记录",
+            "depends_on": [
+              "ai"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:18:13.894493+00:00",
+            "evidence": "角色关联入库、姓名/别名及character_id检索、视觉索引角色变更失效、逐阶段JSONL与独占/包含耗时汇总、API usage已接入；只语法编译，未运行功能测试。"
+          },
+          {
+            "id": "ui",
+            "title": "分组角色编辑、检索展示与日志入口",
+            "depends_on": [
+              "index"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:25:26.924125+00:00",
+            "evidence": "角色窗口、可空字段及图片预览、角色检索依据提示和日志入口已接通；WPF Release编译0警告0错误，未启动GUI或运行功能测试。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态核对、编译发布及路线/提示词文档",
+            "depends_on": [
+              "ui"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T08:36:33.583393+00:00",
+            "evidence": "30个Python文件语法编译、提示词文档源码一致、git diff --check通过；Release编译0警告0错误。常规目录被现有进程锁定，已独立发布artifacts/character-update/MADSearcher.exe。路线/提示词/使用及验收记录已更新；功能测试未运行，v0.1.0远端复核仍为35edf25，角色新功能留本地dev。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-12T08:36:33.723367+00:00",
+      "evidence": "角色列表与可空资料/参考图、512像素外发图、结构化镜头关联及查询、索引模块耗时日志、文档和独立发布均完成；标签固定35edf25，反馈7/8及功能验收继续延期。"
+    },
+    {
+      "id": "library_scroll",
+      "title": "反馈9/10：素材列表像素滚动与作品背景独立滚动",
+      "depends_on": [
+        "character_index"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-12T08:47:14.462355+00:00",
+      "evidence": "反馈9/10已实现：VideoList像素滚动与虚拟化；背景独立105逻辑像素限高滚动、空白折叠及载入回顶。Release编译0警告0错误，publish.ps1成功更新artifacts/app；使用/设计/验收及本地完成标记已更新，git diff --check通过。功能测试未运行，本地dev未提交推送，v0.1.0不变。"
+    },
+    {
+      "id": "alias_newline",
+      "title": "修复角色别名输入无法换行",
+      "depends_on": [
+        "library_scroll"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-12T08:53:38.288270+00:00",
+      "evidence": "角色别名编辑原文独立保留，保存时统一拆分/去空/去重后校验，修复即时规范化导致末尾换行丢失。Release编译0警告0错误，git diff --check通过；原程序继续运行，新版发布artifacts/character-update。使用/设计/验收及本地反馈已更新，功能测试未运行，dev未提交推送、v0.1.0不变。"
+    },
+    {
+      "id": "vision_diagnostics",
+      "title": "补全视觉响应及角色关联校验诊断日志",
+      "depends_on": [
+        "alias_newline"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-12T15:27:24.788284+00:00",
+      "evidence": "已补全视觉响应状态及角色关联详细诊断，日志版本2继承片段范围并汇总validation_failure；规则、提示词和检查点不变。30个Python文件语法检查、18种原因码文档核对及git diff --check通过，未运行功能测试或模型请求。使用/设计/扩展/技术路线/验收和本地反馈已更新；下一次新worker自动生效，无需重发EXE；dev未提交推送，v0.1.0不变。"
+    },
+    {
+      "id": "cutout_timeline",
+      "title": "反馈7：双预览、帧时间线及滑动缓存播放",
+      "depends_on": [
+        "vision_diagnostics"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "预览缓存、精确帧号和工作区交互设计",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-12T15:39:03.141399+00:00",
+            "evidence": "设计文档第13节：持续精确解码、约5秒预取/2秒回看、有界内存、双预览及终点包含当前帧的界面转换；用户允许首次等待，功能测试延期。"
+          },
+          {
+            "id": "buffer",
+            "title": "持续解码、按需预取及有界缓存",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T15:45:18.550963+00:00",
+            "evidence": "BufferedFrameSource已实现单解码进程、约5秒预取、约2秒回看、128MiB像素预算、缓存命中、背压和独立取消；已静态核对，未执行媒体测试。"
+          },
+          {
+            "id": "timeline",
+            "title": "可复用时间线、播放与选区预览控件",
+            "depends_on": [
+              "buffer"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T15:50:38.219728+00:00",
+            "evidence": "FrameTimeline和BufferedPreview已实现缓存着色、帧指针、缩放、播放补缓冲、120ms拖动合并、逐帧和I/O标记事件；Release编译0警告0错误，未执行交互测试。"
+          },
+          {
+            "id": "integration",
+            "title": "抠像双预览、起止同步及任务生命周期",
+            "depends_on": [
+              "timeline"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T15:56:32.868332+00:00",
+            "evidence": "抠像页已接入双可折叠预览、起止帧同步和结果源范围；独立范围校验含取消/版本保护，预览不改任务快照。移除旧共享播放器，维护未运行的历史smoke入口。Release已编译通过，功能测试未运行。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态检查、编译发布及使用文档",
+            "depends_on": [
+              "integration"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-12T15:57:34.797597+00:00",
+            "evidence": "30个Python语法检查、4个XAML解析、Release编译0警告0错误及publish.ps1发布artifacts/app成功；文档与反馈7完成标记已更新。未启动GUI或运行媒体/模型/功能测试，dev未提交推送，v0.1.0不变。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-12T15:57:35.036309+00:00",
+      "evidence": "反馈7已实现双可折叠预览、帧时间线/快捷键和选区同步，持续解码+滑动预取+有界缓存，已静态核对、编译发布及更新文档。反馈8和功能验收延期，dev本地改动、标签不变。"
+    },
+    {
+      "id": "cutout_image_resolution",
+      "title": "抠像定位保留原始分辨率并与索引图像策略分离",
+      "depends_on": [
+        "cutout_timeline"
+      ],
+      "status": "completed",
+      "updated_at": "2026-09-12T16:27:00.266355+00:00",
+      "evidence": "抠像显式采用原尺寸图片策略，首帧/参考图不缩到512，JPEG95/detail:high；索引策略ID和512处理不变，缓存加入字节预算，定位提示词及文档同步。30个Python语法与AST静态检查、git diff --check通过；用例维护但未执行，无模型请求，无需重发EXE。dev本地改动，v0.1.0不变。"
+    },
+    {
+      "id": "shot_index",
+      "title": "反馈11：镜头分段、动态采样与分层缓存",
+      "depends_on": [
+        "cutout_image_resolution"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "确定镜头时间戳、采样和兼容合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-13T03:17:37.085244+00:00",
+            "evidence": "设计第15节定义真实PTS、独立检测/采样/分析缓存、迁移及结果扩展；功能测试延期。"
+          },
+          {
+            "id": "worker",
+            "title": "检测、动态采样、分层缓存与索引检索",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T03:28:21.884569+00:00",
+            "evidence": "检测/实际PTS流、动态采样、三层缓存、迁移及镜头检索已接通；依赖安装与pip check通过；仅静态核对，回归用例未运行。"
+          },
+          {
+            "id": "ui",
+            "title": "索引参数、成本提示与前后镜头扩展",
+            "depends_on": [
+              "worker"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T03:33:02.481848+00:00",
+            "evidence": "分段方式/灵敏度/上限、图片统计、前后镜头扩展和恢复范围已接入；Release编译0警告0错误，未启动界面。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态核对、编译发布与使用文档",
+            "depends_on": [
+              "ui"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T03:42:17.314860+00:00",
+            "evidence": "33个Python语法检查、Pyflakes零问题、XAML与提示词核对通过；pip check无冲突；Release构建0警告0错误，发布artifacts/app成功。文档与本地反馈完成标记已更新，功能测试未运行。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-13T03:42:17.589456+00:00",
+      "evidence": "反馈11已实现镜头检测、动态采样、分层缓存、保留镜头边界和上下文扩展；静态检查与构建发布完成，使用及技术文档齐全。功能验收继续延期，dev未提交推送，标签固定。"
+    },
+    {
+      "id": "named_query_ranking",
+      "title": "反馈13：句内角色提取、多路查询与情节优先排序",
+      "depends_on": [
+        "shot_index"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "查询计划、排序边界与缓存合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-13T03:52:30.046758+00:00",
+            "evidence": "设计第16节：三路查询、最长姓名匹配、情节门槛与70/20/10评分、歧义保护、有界查询缓存；不变更索引。"
+          },
+          {
+            "id": "worker",
+            "title": "实体提取、多路召回、排名融合及查询向量缓存",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T08:15:57.359363+00:00",
+            "evidence": "实体提取、原句/情节/外观三路、RRF与人物有限加分、低权重补充召回、邻近证据及有界查询缓存已实现；静态核对及Pyflakes通过，待执行回归源代码已维护。"
+          },
+          {
+            "id": "delivery",
+            "title": "结果说明、静态检查、构建发布与文档",
+            "depends_on": [
+              "worker"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T08:24:23.561316+00:00",
+            "evidence": "36个Python AST、4个XAML XML、5个变更文件Pyflakes零问题；独立静态复核完成，Release构建0警告0错误并发布artifacts/app；使用与技术文档、本地反馈完成标记齐全，未运行功能测试。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-13T08:24:24.539300+00:00",
+      "evidence": "反馈13查询和排序实现完成，现有索引直接复用；句内姓名/别名、原句/情节/外观三路、情节主导融合和有界缓存、UI解释及文档已交付。静态检查和编译发布通过，反馈12及功能验收继续延期；dev未提交推送，v0.1.0固定。"
+    },
+    {
+      "id": "dialogue_retrieval",
+      "title": "独立台词索引、分路召回与三种搜索模式",
+      "depends_on": [
+        "named_query_ranking"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "字幕单元、增量补建和排序合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-13T08:41:36.067424+00:00",
+            "evidence": "设计第17节完成：独立字幕单元、版本3迁移、只补台词、三路模式与原文优先；功能测试延期。"
+          },
+          {
+            "id": "worker",
+            "title": "持久化、补建、单句语义和独立召回",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T15:10:29.235658+00:00",
+            "evidence": "独立字幕表与版本3迁移、逐条/短上下文单元、仅台词补建、分路召回与三模式已接入；复用数据库及文本向量缓存。AST及Pyflakes零问题，尚未运行功能测试。"
+          },
+          {
+            "id": "delivery",
+            "title": "界面CLI、文档、静态核对与发布",
+            "depends_on": [
+              "worker"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T15:24:44.317648+00:00",
+            "evidence": "三模式、补建按钮、台词条数和时码/评分说明、CLI与文档已完成；39个Python AST、4个XAML XML、9文件Pyflakes零问题，Release构建0警告0错误并发布。未执行功能测试、迁移或实际补建。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-13T15:24:45.084604+00:00",
+      "evidence": "用户授权的前三项已实现：独立台词单元与向量、字面/语义分路召回、综合/台词/画面情节模式及旧素材补建；源码静态核对、构建发布和文档完成。实际台词补建需用户启动，功能验收及精排延期。dev未提交推送，标签固定。"
+    },
+    {
+      "id": "ass_cleanup",
+      "title": "ASS绘图过滤与重复渲染合并",
+      "depends_on": [
+        "dialogue_retrieval"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "绘图状态、合并边界与兼容合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-13T15:37:29.484241+00:00",
+            "evidence": "设计第18节完成：顺序绘图状态、同层/短特效保守合并、保留普通重复对白和时间、清理后计数及独立台词版本。"
+          },
+          {
+            "id": "implementation",
+            "title": "解析清理、条数限制与诊断",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T15:47:03.543912+00:00",
+            "evidence": "ASS顺序绘图过滤、同层去重/短事件合并、清理后计数、两条索引流程的统计日志和独立台词版本已实现；维护回归源码但未运行，首次静态检查通过。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态复核、构建发布和文档",
+            "depends_on": [
+              "implementation"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-13T15:53:49.755675+00:00",
+            "evidence": "39个Python AST、4个XAML XML、5个变更文件Pyflakes通过；Release构建0警告0错误，publish.ps1发布artifacts/app。使用/技术/扩展/验收记录和本地反馈已更新；未执行功能测试、实际解析补建、API或迁移。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-13T15:53:50.519003+00:00",
+      "evidence": "用户授权的ASS解析修复已实现并构建发布：绘图过滤、重复特效合并、有效字幕计数、诊断及独立清理版本。原文件保持只读，可仅补建台词；实际文件处理及功能验收延期。"
+    },
+    {
+      "id": "ae_export_modes",
+      "title": "AE三种导出与已有结果补导出",
+      "depends_on": [
+        "ass_cleanup",
+        "cutout_timeline"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "像素保真、修补层和补导出合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-14T01:49:29.627090+00:00",
+            "evidence": "设计第19节确定：三模式、Alpha修补底稿、无损像素交接、矢量保护与回退、独立补导出和完整性边界。"
+          },
+          {
+            "id": "worker",
+            "title": "统一AE脚本、三模式、诊断和重导出服务",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T01:58:17.818099+00:00",
+            "evidence": "统一ES3模板、RGBA/Alpha修补/矢量模式、4096点保护、像素回退、独立补导出与诊断已接入；无媒体/模型调用。维护回归源码，AST通过，修正静态未使用导入；功能验收延期。"
+          },
+          {
+            "id": "desktop",
+            "title": "界面CLI入口和状态提示",
+            "depends_on": [
+              "worker"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T02:01:18.430071+00:00",
+            "evidence": "WPF三方式（默认Alpha）、已有任务manifest选择补导出、实际发送方式/来源/报告提示及CLI已接入；输入快照和单任务保留。Release初次构建0警告0错误；41 AST/4 XML/6 Pyflakes与JS语法通过。"
+          },
+          {
+            "id": "delivery",
+            "title": "文档、静态检查及构建发布",
+            "depends_on": [
+              "desktop"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T02:11:55.725989+00:00",
+            "evidence": "41个Python AST、4个XAML XML、6文件Pyflakes和JSX语法通过；Release构建0警告0错误并发布artifacts/app。使用与技术文档、修补指南和验收记录完成；未执行功能或AE测试。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-14T02:11:56.524357+00:00",
+      "evidence": "三种AE导出、默认原画加Alpha修补层、4096点矢量保护和像素回退、已有完成结果独立补导出均已实现，静态检查、构建发布和文档完成。原始像素不改写；dev未提交推送，v0.1.0固定，功能及AE验收延期。"
+    },
+    {
+      "id": "storage_cleanup",
+      "title": "反馈15–17缓存清理、索引目录与持久缩略图",
+      "depends_on": [
+        "ae_export_modes"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "清理范围与索引资源保护合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-14T15:00:51.942802+00:00",
+            "evidence": "设计第20节确定清理白名单、结果保护、旧缩略图事务迁移、扫描令牌及跨进程活动锁；仅静态检查和发布。"
+          },
+          {
+            "id": "worker",
+            "title": "缩略图、保护扫描、清理与活动锁",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T15:31:33.561508+00:00",
+            "evidence": "持久缩略图、旧引用原样复制与事务迁移、白名单扫描令牌、逐文件清理、结果/引用保护及共享独占活动锁已接入；已维护回归源码，功能测试未运行。"
+          },
+          {
+            "id": "desktop",
+            "title": "工具菜单、确认计划和CLI",
+            "depends_on": [
+              "worker"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T15:31:34.393123+00:00",
+            "evidence": "工具菜单打开索引目录和缓存清理、容量/迁移确认、临时预览释放、实际结果与部分失败提示及CLI已接入；后台范围探测在清理期间暂停，任务输入保持快照。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态检查、构建发布与使用文档",
+            "depends_on": [
+              "desktop"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T15:33:54.567208+00:00",
+            "evidence": "46个Python AST、4个XAML XML、8文件Pyflakes及源码文档完整性通过，Release构建0警告0错误并发布artifacts/app；使用/技术/验收记录和反馈15–17完成标记齐全。未执行功能测试、实际清理或迁移。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-14T15:33:56.131466+00:00",
+      "evidence": "反馈15–17已实现：工具菜单清理缓存与打开索引目录、永久缩略图和旧引用事务迁移、扫描令牌及结果保护。静态检查、恢复完整性核对、构建发布和文档完成；实际清理及功能验收延期，dev未提交推送，标签未修改。"
+    },
+    {
+      "id": "ae_editing_workspace",
+      "title": "AE可视修补与整体边缘入口",
+      "depends_on": [
+        "ae_export_modes"
+      ],
+      "status": "completed",
+      "subdag": {
+        "nodes": [
+          {
+            "id": "design",
+            "title": "合成关系、原画预览与像素保护合同",
+            "depends_on": [],
+            "status": "completed",
+            "updated_at": "2026-09-14T16:22:50.642396+00:00",
+            "evidence": "设计19.1明确单个对外合成、整体边缘控制、彩色补回及最终原画乘Alpha；新报告版本，不修改旧工程。"
+          },
+          {
+            "id": "implementation",
+            "title": "彩色补回、边缘控制与版本诊断",
+            "depends_on": [
+              "design"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T16:28:20.715274+00:00",
+            "evidence": "JSX已接入原画补回、局部修补入口、两项整体Alpha边缘滑块及内部层保护；报告/日志/返回值包含脚本版本2，JavaScript语法通过。"
+          },
+          {
+            "id": "delivery",
+            "title": "静态复核、使用文档和发布",
+            "depends_on": [
+              "implementation"
+            ],
+            "status": "completed",
+            "updated_at": "2026-09-14T16:31:00.062038+00:00",
+            "evidence": "46 AST/4 XML/80文本完整性、2文件Pyflakes、JSX V8语法通过；Release build与publish均0警告0错误。操作与迁移文档完成，未执行功能或AE测试。"
+          }
+        ]
+      },
+      "updated_at": "2026-09-14T16:31:00.190310+00:00",
+      "evidence": "AE彩色补回/去除工作区、整体边缘双滑块、内部图层保护和脚本版本2已实现并发布。对外一个合成，旧工程及PNG保留；静态检查通过，功能验收延期，本地dev未推送，标签固定。"
     }
   ],
-  "scope_update": "2026-09-12：完成本地反馈5/6，4/7/8仍待定；功能测试继续延期。"
+  "scope_update": "用户授权改进AE导出合成关系：对外一个人物合成，内部明确补回、去除及整体边缘入口，补回显示原画。保留原始像素和已有AE工程；功能及真实AE验收继续延期。"
 }
